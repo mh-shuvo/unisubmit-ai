@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}UniSubmit AI{% endblock %}</title><link rel="stylesheet" href="/static/style.css"></head><body>
+{% set student_signed_in = request.session.get('student_id') %}
+{% set admin_signed_in = request.session.get('admin_id') %}
+<header class="topbar {% if student_signed_in or admin_signed_in %}private-topbar{% endif %}">
+  {% if student_signed_in %}
+    <a class="brand" href="/student/dashboard"><span class="brandmark">U</span><span>UniSubmit AI<small>Student workspace</small></span></a>
+    <button class="menu-btn" onclick="document.body.classList.toggle('menu-open')">☰</button>
+    <nav class="private-nav">
+      <a href="/student/dashboard" class="{% if request.url.path=='/student/dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/submit" class="{% if request.url.path=='/submit' %}active{% endif %}">New Submission</a>
+      <a href="/student/profile" class="{% if request.url.path=='/student/profile' %}active{% endif %}">Profile</a>
+      <a href="/student/logout" class="nav-logout">Logout</a>
+    </nav>
+  {% elif admin_signed_in %}
+    <a class="brand" href="/admin"><span class="brandmark">U</span><span>UniSubmit AI<small>Administration workspace</small></span></a>
+    <button class="menu-btn" onclick="document.body.classList.toggle('menu-open')">☰</button>
+    <nav class="private-nav">
+      <a href="/admin" class="{% if request.url.path=='/admin' %}active{% endif %}">Dashboard</a>
+      <span class="role-chip">Admin session</span>
+      <a href="/admin/logout" class="nav-logout">Logout</a>
+    </nav>
+  {% else %}
+    <a class="brand" href="/"><span class="brandmark">U</span><span>UniSubmit AI<small>Academic submission intelligence</small></span></a>
+    <button class="menu-btn" onclick="document.body.classList.toggle('menu-open')">☰</button>
+    <nav><a href="/">Home</a><a href="/guidelines">Guidelines</a><a href="/how-it-works">How it works</a><a href="/student/login" class="nav-login">Student Login</a><a href="/student/register" class="primary-link">Create Account</a></nav>
+  {% endif %}
+</header>
+<main>{% block content %}{% endblock %}</main>
+{% if not student_signed_in and not admin_signed_in %}<footer class="footer"><div><b>UniSubmit AI</b><p>AI-assisted academic pre-submission validation with human academic oversight.</p></div><div>Privacy-first · Local AI ready · PDF-only workflow</div></footer>{% endif %}
+<script>{% block script %}{% endblock %}</script></body></html>

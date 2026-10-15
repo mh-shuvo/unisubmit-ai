@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+httpx
+pydantic
+python-multipart
+PyMuPDF
+qdrant-client
+FlagEmbedding
+sentence-transformers
+torch
+python-dotenv

@@ -1,0 +1,25 @@
+# Virtual environments
+.venv/
+ai_service/.venv/
+
+# Environment files (contain secrets)
+.env
+ai_service/.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Database
+*.db
+
+# macOS
+.DS_Store
+
+# Storage uploads (user data)
+storage/
+
+# IDE
+.idea/
+.vscode/

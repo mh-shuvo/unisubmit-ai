@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Local AI Status · UniSubmit AI{% endblock %}
+{% block content %}
+<a href="/admin">← Admin</a>
+<h1>Local AI Status</h1>
+<p class="muted">Check whether Ollama is reachable and whether the configured local model is installed before running AI suggestions.</p>
+
+{% if test_message %}
+<div class="alert {{ 'success' if test_ok == '1' else 'error' }}"><b>Model test:</b> {{ test_message }}</div>
+{% endif %}
+
+<div class="grid two">
+<section class="card">
+  <h2>Connection</h2>
+  <p><b>Ollama URL:</b> <code>{{ status.configured_url }}</code></p>
+  <p><b>Server:</b>
+    <span class="pill {{ 'ok' if status.server_online else 'warn' }}">{{ 'ONLINE' if status.server_online else 'OFFLINE' }}</span>
+  </p>
+  <p><b>Configured model:</b> <code>{{ status.configured_model }}</code></p>
+  <p><b>Model:</b>
+    <span class="pill {{ 'ok' if status.model_installed else 'warn' }}">{{ 'INSTALLED' if status.model_installed else 'NOT FOUND' }}</span>
+  </p>
+  {% if status.error %}<p class="muted"><b>Connection detail:</b> {{ status.error }}</p>{% endif %}
+  <form method="post" action="/admin/ai/test"><button {% if not status.server_online or not status.model_installed %}disabled title="Start Ollama and install the configured model first"{% endif %}>Test configured model</button></form>
+</section>
+
+<section class="card">
+  <h2>Windows setup</h2>
+  <p>After installing Ollama, run:</p>
+  <pre class="feedback">ollama pull {{ status.configured_model }}
+ollama list
+ollama run {{ status.configured_model }}</pre>
+  <p>If Ollama is not running:</p>
+  <pre class="feedback">ollama serve</pre>
+  <p class="muted">Then restart UniSubmit AI and revisit this page.</p>
+</section>
+</div>
+
+<section class="card">
+<h2>Installed Ollama Models</h2>
+{% if status.server_online %}
+  {% if status.models %}
+    <table><tr><th>Model name</th><th>Configured?</th></tr>
+    {% for m in status.models %}<tr><td><code>{{m}}</code></td><td>{% if m == status.configured_model %}<span class="pill ok">YES</span>{% else %}<span class="muted">No</span>{% endif %}</td></tr>{% endfor %}</table>
+  {% else %}<p class="muted">Ollama is running, but no models are installed.</p>{% endif %}
+{% else %}
+  <p class="muted">Start Ollama to display installed models.</p>
+{% endif %}
+</section>
+
+<section class="card">
+<h2>How AI is used in this MVP</h2>
+<p>Deterministic approved rules decide submission PASS/FAIL. The local model currently generates non-blocking academic improvement suggestions. This prevents an unavailable or inconsistent LLM from changing compliance status.</p>
+</section>
+{% endblock %}

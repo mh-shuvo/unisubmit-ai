@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% block title %}Validation Report · Submission #{{sub.id}} · UniSubmit AI{% endblock %}
+{% block content %}
+<div class="page-shell report-shell">
+  <div class="report-toolbar">
+    <div class="report-back-group"><a class="btn ghost small" href="/student/dashboard">← Dashboard</a><a class="btn ghost small" href="/submission/{{sub.id}}">Back to submission</a></div>
+    <div class="actions report-actions">
+      <a class="btn secondary small" href="/files/submission/{{version.id}}">View submitted PDF</a>
+      <a class="btn small" href="/files/report/{{sub.id}}/{{version.id}}/{{report_run_token}}">Download report PDF</a>
+    </div>
+  </div>
+
+  <section class="report-hero {{'report-pass' if version.status == 'PASSED' else 'report-review'}}">
+    <div>
+      <span class="eyebrow">AI Pre-Submission Review</span>
+      <h1>Guideline Compliance &amp; Improvement Report</h1>
+      <p>Submission #{{sub.id}} · Version {{version.version_no}} · {{sub.program.name}}</p>
+    </div>
+    <div class="report-status-card">
+      <small>Overall status</small>
+      <strong>{{version.status}}</strong>
+      {% if version.ai_run_reference %}<span>{{version.ai_run_reference}}</span>{% endif %}
+    </div>
+  </section>
+
+  <div class="report-meta-grid">
+    <div><small>Student</small><b>{{sub.student.name}}</b><span>{{sub.student.student_id}}</span></div>
+    <div><small>Submission type</small><b>{{sub.template_version.template.submission_type}}</b><span>Guideline v{{sub.template_version.version}}</span></div>
+    <div><small>Supervisor</small><b>{{sub.teacher.name}}</b><span>{{sub.teacher.designation}}</span></div>
+    <div><small>Submitted</small><b>Version {{version.version_no}}</b><span>{{version.created_at.strftime('%d %b %Y, %I:%M %p') if version.created_at else ''}}</span></div>
+  </div>
+
+  <section class="report-section">
+    <div class="report-section-head"><span class="report-icon compliance-icon">%</span><div><h2>Validation Statistics</h2><p>Rule-level summary for deterministic guideline rules and configured additional restrictions.</p></div></div>
+    <div class="stats-card-grid">
+      <div class="stats-card"><small>Total checked</small><b>{{report_summary.get('total_checked',0)}}</b></div>
+      <div class="stats-card"><small>Passed</small><b>{{report_summary.get('passed',0)}}</b></div>
+      <div class="stats-card"><small>Failed</small><b>{{report_summary.get('failed',0)}}</b></div>
+      <div class="stats-card"><small>Warnings</small><b>{{report_summary.get('warnings',0)}}</b></div>
+      <div class="stats-card"><small>Semantic review</small><b>{{report_summary.get('semantic_total',0)}}</b></div>
+      <div class="stats-card"><small>Compliance rate</small><b>{{report_summary.get('compliance_rate') ~ '%' if report_summary.get('compliance_rate') is not none else 'N/A'}}</b><div class="compliance-meter"><span style="width:{{report_summary.get('compliance_rate',0) or 0}}%"></span></div></div>
+    </div>
+    {% if report_summary.get('categories') %}
+    <table class="stats-breakdown"><thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Warning</th></tr></thead><tbody>{% for name,st in report_summary.get('categories',{}).items() %}<tr><td><b>{{name}}</b></td><td>{{st.total}}</td><td>{{st.passed}}</td><td>{{st.failed}}</td><td>{{st.warnings}}</td></tr>{% endfor %}</tbody></table>
+    {% endif %}
+    {% if report_summary.get('note') %}<p class="helper">{{report_summary.get('note')}}</p>{% endif %}
+  </section>
+
+  <div class="report-summary-strip">
+    <div><small>Mandatory issues</small><b>{{report_summary.mandatory_failures}}</b></div>
+    <div><small>Formatting failures</small><b>{{report_summary.format_failures}}</b></div>
+    <div><small>Warnings</small><b>{{report_summary.warnings}}</b></div>
+    <div><small>Affected pages</small><b>{{report_summary.affected_pages|join(', ') if report_summary.affected_pages else 'None'}}</b></div>
+  </div>
+
+  <div class="report-layout">
+    <main class="report-main">
+      <section class="report-section format-section">
+        <div class="report-section-head"><span class="report-icon format-icon">Aa</span><div><h2>Parsed Guideline Rule Results</h2><p>Every active deterministic rule is listed with its PASS, FAIL, WARNING, or NOT VERIFIED status. Failed same-type occurrences remain consolidated.</p></div></div>
+        {% if format_results %}
+          <div class="format-issue-list">
+          {% for r in format_results %}
+            <details class="format-issue {{'format-fail' if r.status=='FAIL' else ('format-pass' if r.status=='PASS' else 'format-warning')}}" {% if r.status=='FAIL' %}open{% endif %}>
+              <summary><div><span class="badge {{r.status|lower|replace(' ','-')}}">{{r.status}}</span><b>{{r.name}}</b><small>Expected: {{r.expected}}{% if r.detected %} · Detected: {{r.detected}}{% endif %}</small></div><div class="page-chips">{% for p in r.affected_pages or [] %}<span>p.{{p}}</span>{% endfor %}</div></summary>
+              <div class="format-issue-body">
+                <div class="issue-grid"><div><small>Problem</small><p>{{r.message}}</p></div><div><small>Required correction</small><p>{{r.correction or 'Correct the affected formatting to match the guideline.'}}</p></div><div><small>Rule source</small><p>{% if r.source_type=='Manual Semantic Rule' %}Manual Semantic Rule{% elif r.source_pages %}Pages {{r.source_pages|join(', ')}}{% elif r.source_page %}Page {{r.source_page}}{% else %}Approved guideline{% endif %}{% if r.source_section %} · {{r.source_section}}{% endif %}</p>{% if r.source_text %}<small class="source-evidence">{{r.source_text}}</small>{% endif %}</div><div><small>Detected</small><p>{{r.detected}}</p></div></div>
+                {% if r.occurrences %}<div class="occurrence-table"><div class="occurrence-head"><span>Page</span><span>Location</span><span>Detected</span><span>Example</span></div>{% for o in r.occurrences %}<div class="occurrence-row"><span><b>{{ 'p.' ~ o.page if o.page else 'Document-level' }}</b></span><span>{{o.location}}</span><span>{{o.detected}}</span><span>{{o.snippet or '—'}}</span></div>{% endfor %}</div>{% endif %}
+              </div>
+            </details>
+          {% endfor %}
+          </div>
+        {% else %}<div class="empty-report success-empty">No active deterministic guideline rules were available for this validation run.</div>{% endif %}
+      </section>
+      <section class="report-section semantic-section">
+        <div class="report-section-head"><span class="report-icon compliance-icon">S</span><div><h2>Semantic Guideline Rule Results</h2><p>Every active semantic rule is evaluated by Qwen with RAG grounding and shown with its explicit status.</p></div></div>
+        {% if semantic_results %}
+          <div class="format-issue-list">
+          {% for r in semantic_results %}
+            <details class="format-issue {{'format-fail' if r.status=='FAIL' else ('format-pass' if r.status=='PASS' else 'format-warning')}}" {% if r.status in ['FAIL','WARNING','NOT VERIFIED'] %}open{% endif %}>
+              <summary><div><span class="badge {{r.status|lower|replace(' ','-')}}">{{r.status}}</span><b>{{r.name}}</b><small>Severity: {{r.severity}}{% if r.detected %} · Detected: {{r.detected}}{% endif %}</small></div><div class="page-chips">{% if r.source_type=='Manual Semantic Rule' %}<span>Manual rule</span>{% elif r.source_pages %}<span>Guideline pp.{{r.source_pages|join(', ')}}</span>{% elif r.source_page %}<span>Guideline p.{{r.source_page}}</span>{% endif %}</div></summary>
+              <div class="format-issue-body">
+                <div class="issue-grid"><div><small>Assessment</small><p>{{r.message}}</p></div><div><small>Required correction</small><p>{{r.correction or ('No correction required.' if r.status=='PASS' else 'No mandatory correction was generated.') }}</p></div><div><small>Rule source</small><p>{% if r.source_type=='Manual Semantic Rule' %}Manual Semantic Rule{% elif r.source_pages %}Pages {{r.source_pages|join(', ')}}{% elif r.source_page %}Page {{r.source_page}}{% else %}Approved guideline{% endif %}{% if r.source_section %} · {{r.source_section}}{% endif %}</p>{% if r.source_text %}<small class="source-evidence">{{r.source_text}}</small>{% endif %}</div><div><small>Student evidence</small><p>{{r.detected or 'Not verified'}}</p></div></div>
+              </div>
+            </details>
+          {% endfor %}
+          </div>
+        {% else %}<div class="empty-report">No active semantic guideline rules were available for this validation run.</div>{% endif %}
+      </section>
+
+      <section class="report-section">
+        <div class="report-section-head"><span class="report-icon compliance-icon">✓</span><div><h2>Guideline Compliance Assessment</h2><p>Findings grounded in the approved guideline and additional rule sources.</p></div></div>
+        {% if parsed.compliance %}
+          <div class="report-list">
+          {% for item in parsed.compliance %}<div class="report-item compliance-item"><span>{{loop.index}}</span><p>{{ render_md(item)|safe }}</p></div>{% endfor %}
+          </div>
+        {% else %}<div class="empty-report">No guideline compliance findings were reported.</div>{% endif %}
+      </section>
+
+      <section class="report-section correction-section">
+        <div class="report-section-head"><span class="report-icon correction-icon">!</span><div><h2>Required Corrections</h2><p>Items that should be corrected before a compliant submission can pass.</p></div></div>
+        {% if parsed.corrections %}
+          <div class="report-list">
+          {% for item in parsed.corrections %}<div class="report-item correction-item"><span>{{loop.index}}</span><p>{{ render_md(item)|safe }}</p></div>{% endfor %}
+          </div>
+        {% else %}<div class="empty-report success-empty">No guideline-supported mandatory correction was reported.</div>{% endif %}
+      </section>
+
+      <section class="report-section suggestion-section">
+        <div class="report-section-head"><span class="report-icon suggestion-icon">✦</span><div><h2>AI Improvement Suggestions</h2><p>Non-blocking recommendations intended to improve academic clarity and presentation.</p></div></div>
+        {% if parsed.suggestions %}
+          <div class="suggestion-grid">
+          {% for item in parsed.suggestions %}<article class="suggestion-card"><span class="suggestion-number">{{'%02d'|format(loop.index)}}</span><p>{{ render_md(item)|safe }}</p></article>{% endfor %}
+          </div>
+        {% else %}<div class="empty-report">No additional improvement suggestions were generated.</div>{% endif %}
+      </section>
+
+      <section class="report-section">
+        <div class="report-section-head"><span class="report-icon rule-icon">R</span><div><h2>Additional Restriction Checks</h2><p>Explicit rules configured by the Department/Institute administrator.</p></div></div>
+        {% if results %}
+          <div class="restriction-list">
+          {% for r in results %}
+            <div class="restriction-row"><span class="badge {{r.status|lower|replace(' ','-')}}">{{r.status}}</span><div><b>{{r.name}}</b><small>{{r.message or r.detected or ''}}</small></div><em>{{r.severity}}</em></div>
+          {% endfor %}
+          </div>
+        {% else %}<div class="empty-report">No additional structured restrictions were configured.</div>{% endif %}
+      </section>
+
+      <section class="report-section evidence-section">
+        <div class="report-section-head"><span class="report-icon evidence-icon">⌁</span><div><h2>Grounding &amp; Evidence Note</h2><p>How strongly the response could be supported by retrieved guideline context.</p></div></div>
+        {% if parsed.grounding %}{% for item in parsed.grounding %}<p class="grounding-text">{{ render_md(item)|safe }}</p>{% endfor %}{% else %}<p class="grounding-text">No grounding note was returned for this validation run.</p>{% endif %}
+      </section>
+    </main>
+
+    <aside class="report-side">
+      <div class="report-side-card">
+        <small>Report status</small>
+        <div class="status-orb {{'ok' if version.status == 'PASSED' else 'review'}}">{{'✓' if version.status == 'PASSED' else '!'}}</div>
+        <h3>{{version.status}}</h3>
+        <p>Generated from the applicable guideline version and configured restrictions.</p>
+      </div>
+      <div class="report-side-card source-summary">
+        <small>Source context</small>
+        <dl><dt>Program</dt><dd>{{sub.program.name}}</dd><dt>Guideline</dt><dd>v{{sub.template_version.version}}</dd><dt>Submission</dt><dd>{{sub.template_version.template.submission_type}}</dd><dt>AI run</dt><dd>{{version.ai_run_reference or 'N/A'}}</dd></dl>
+      </div>
+      <div class="report-note"><b>Academic responsibility</b><p>This is a pre-submission assistance report. Final academic judgment remains with the supervisor/teacher.</p></div>
+    </aside>
+  </div>
+</div>
+{% endblock %}

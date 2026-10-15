@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% block title %}Guideline Version · UniSubmit AI{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+{% include '_admin_nav.html' %}
+<main class="dashboard-main">
+  <div class="page-head">
+    <div><span class="eyebrow">Guideline Version</span><h1>{{tv.template.program.name}} · {{tv.template.submission_type}}</h1><p>Version {{tv.version}} · {{tv.status}} · The approved guideline PDF is the single source of truth.</p></div>
+    <span class="badge {{'passed' if tv.rag_status=='Indexed' else 'pending'}}">RAG {{tv.rag_status}}</span>
+  </div>
+  {% if message %}<div class="alert success">{{message}}</div>{% endif %}{% if error %}<div class="alert error">{{error}}</div>{% endif %}
+
+  <div class="source-grid">
+    <article class="source-card primary-source"><span>01</span><div><small>PRIMARY SOURCE</small><h3>Official Guideline PDF</h3><p>Text is parsed first. Explicit requirements become the validation profile.</p></div><b>Uploaded</b></article>
+    <article class="source-card"><span>02</span><div><small>RAG KNOWLEDGE</small><h3>BGE-M3 + Qdrant</h3><p>The same guideline is indexed for grounded semantic review by Qwen.</p></div><b>{{tv.rag_status}}</b></article>
+    <article class="source-card"><span>03</span><div><small>COVER PAGE</small><h3>Visual Sample</h3><p>{{'Cover/title-page sample detected for layout checking.' if parsed_profile.get('cover_page',{}).get('detected') else 'No cover/title-page template pattern detected.'}}</p></div><b>{{'Detected' if parsed_profile.get('cover_page',{}).get('detected') else 'Optional'}}</b></article>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><div><h2>Parse & Index Approved Guideline</h2><p>Re-indexing first parses the PDF into explicit rules, then updates the RAG knowledge base.</p></div><span class="badge {{'passed' if tv.format_profile_status=='Active' else 'pending'}}">{{tv.format_profile_status}}</span></div>
+    <div class="rag-box"><div><small>Qdrant collection</small><b>{{tv.rag_collection or 'Not created yet'}}</b></div><form method="post" action="/admin/template-version/{{tv.id}}/index"><button class="btn">{{'Re-parse & Re-index Guideline' if tv.rag_status=='Indexed' else 'Parse & Index Guideline'}}</button></form></div>
+  </section>
+
+  {% set diag = parsed_profile.get('parser_diagnostics',{}) %}
+  {% if diag %}
+  <section class="panel">
+    <div class="panel-head"><div><h2>Parser Diagnostics</h2><p>Shows whether Qwen returned valid structured JSON and whether the standard-text fallback parser contributed explicit rules.</p></div><span class="badge {{'passed' if diag.get('qwen_json_parsed') else 'pending'}}">{{'Qwen JSON OK' if diag.get('qwen_json_parsed') else 'Fallback Used'}}</span></div>
+    <div class="summary-grid">
+      <div class="summary-card"><small>Pages parsed</small><b>{{diag.get('pages_with_text',0)}}</b></div>
+      <div class="summary-card"><small>Fallback rules detected</small><b>{{diag.get('fallback_rules_added',0)}}</b></div>
+      <div class="summary-card"><small>Qwen structured output</small><b>{{'Valid' if diag.get('qwen_json_parsed') else ('Partial - Review' if diag.get('qwen_partial') else 'Not parsed')}}</b></div>
+      <div class="summary-card"><small>Coverage audit</small><b>{{'OK' if diag.get('coverage_ok') else 'Review'}}</b></div>
+    </div>
+    {% if diag.get('qwen_chunks_total') is not none %}<p>Qwen chunks completed: <b>{{diag.get('qwen_chunks_succeeded',0)}} / {{diag.get('qwen_chunks_total',0)}}</b></p>{% endif %}
+    {% if diag.get('qwen_error') %}<div class="alert warning"><b>Qwen parser note:</b> {{diag.get('qwen_error')}}</div>{% endif %}
+    {% if diag.get('missing_categories') %}<div class="alert warning"><b>Coverage warning:</b> Explicit guideline text appears to mention categories not fully represented in the parsed rules: {{diag.get('missing_categories')|join(', ')}}.</div>{% endif %}
+    {% if diag.get('program_guideline_mismatch') %}<div class="alert error"><b>Program-guideline mismatch:</b> {{diag.get('consistency_note')}} Activation is blocked until the correct guideline is uploaded.</div>{% endif %}
+  </section>
+  {% endif %}
+
+  <form method="post" action="/admin/template-version/{{tv.id}}/review-rules" id="rule-review-form">
+    <section class="panel rule-review-toolbar">
+      <div class="panel-head">
+        <div><h2>Rule Severity Review</h2><p>Qwen suggests a severity, but the Department/Institute Admin decides the final validation effect before activation.</p></div>
+        <button class="btn" type="submit">Save Rule Review</button>
+      </div>
+      <div class="bulk-review-bar">
+        <b>Selected rules:</b>
+        <button type="button" class="btn ghost small" data-bulk="Mandatory">Mandatory</button>
+        <button type="button" class="btn ghost small" data-bulk="Warning">Warning</button>
+        <button type="button" class="btn ghost small" data-bulk="Recommendation">Recommendation</button>
+        <button type="button" class="btn ghost small" data-bulk="Ignore">Ignore</button>
+        <span class="helper">Changing severity moves the profile back to Review Required. Re-activate it after review.</span>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="panel-head"><div><h2>Parsed Deterministic Rules</h2><p>Measurable requirements explicitly found in the guideline text.</p></div><span class="badge">{{parsed_profile.get('deterministic_rules',[])|length}} rules</span></div>
+        <div class="card-list">
+        {% for r in parsed_profile.get('deterministic_rules',[]) %}
+          <div class="list-card rule-review-card">
+            <input class="rule-check" type="checkbox" aria-label="Select rule">
+            <div class="rule-review-main"><b>{{r.get('type','')|replace('_',' ')|title}}{{' · '+r.get('target','') if r.get('target') else ''}}</b><span>Expected: {{r.get('value')}}</span><small>Guideline page {{r.get('source_page','?')}}{% if r.get('source_section') %} · {{r.get('source_section')}}{% endif %} · {{r.get('evidence','')}}</small><small class="ai-suggested">AI suggested: {{r.get('suggested_severity','Mandatory')}}</small></div>
+            <label class="severity-control"><span>Final severity</span><select name="det_{{loop.index0}}" class="rule-severity"><option {% if r.get('final_severity')=='Mandatory' %}selected{% endif %}>Mandatory</option><option {% if r.get('final_severity')=='Warning' %}selected{% endif %}>Warning</option><option {% if r.get('final_severity')=='Recommendation' %}selected{% endif %}>Recommendation</option><option {% if r.get('final_severity')=='Ignore' %}selected{% endif %}>Ignore</option></select></label>
+          </div>
+        {% else %}<div class="empty-state">No deterministic rules parsed yet. Parse/re-index the guideline.</div>{% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><h2>Parsed Semantic Requirements</h2><p>Qwen checks these against student content using targeted RAG retrieval.</p></div><span class="badge">{{parsed_profile.get('semantic_requirements',[])|length}} requirements</span></div>
+        <div class="card-list">
+        {% for r in parsed_profile.get('semantic_requirements',[]) %}
+          <div class="list-card rule-review-card">
+            <input class="rule-check" type="checkbox" aria-label="Select requirement">
+            <div class="rule-review-main"><b>{{r.get('requirement','')}}</b><span>{{r.get('target_section') or r.get('source_section') or 'Document-wide semantic requirement'}}</span><small>{% if r.get('source_type')=='Manual Semantic Rule' %}Manual semantic rule{% else %}Guideline {% if r.get('source_pages') %}pages {{r.get('source_pages')|join(', ')}}{% else %}page {{r.get('source_page','?')}}{% endif %}{% if r.get('source_section') %} · {{r.get('source_section')}}{% endif %}{% endif %}</small><small class="ai-suggested">AI suggested: {{r.get('suggested_severity','Mandatory')}}{% if r.get('merged_duplicate_count') %} · {{r.get('merged_duplicate_count')}} duplicate source(s) merged{% endif %}</small></div>
+            <label class="severity-control"><span>Final severity</span><select name="sem_{{loop.index0}}" class="rule-severity"><option {% if r.get('final_severity')=='Mandatory' %}selected{% endif %}>Mandatory</option><option {% if r.get('final_severity')=='Warning' %}selected{% endif %}>Warning</option><option {% if r.get('final_severity')=='Recommendation' %}selected{% endif %}>Recommendation</option><option {% if r.get('final_severity')=='Ignore' %}selected{% endif %}>Ignore</option></select></label>
+          </div>
+        {% else %}<div class="empty-state">No semantic requirements parsed yet.</div>{% endfor %}
+        </div>
+      </section>
+    </div>
+  </form>
+
+  <section class="panel">
+    <div class="panel-head"><div><h2>Manual Semantic Rules</h2><p>Add institution-specific semantic checks that are not stated in the approved guideline. These use the same Qwen + RAG evaluation pipeline as parsed semantic requirements.</p></div><span class="badge">{{parsed_profile.get('semantic_requirements',[])|selectattr('manual')|list|length}} manual rule(s)</span></div>
+    <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules" class="form-grid cols-2 semantic-add-form">
+      <label class="span-2">Requirement text<textarea name="requirement" required placeholder="Example: The Methodology section must explain how ambiguous cases are resolved."></textarea></label>
+      <label>Target section<input name="target_section" placeholder="e.g., Abstract, Methodology, Discussion"></label>
+      <label>Severity<select name="severity"><option>Mandatory</option><option>Warning</option><option>Recommendation</option><option>Ignore</option></select></label>
+      <label class="span-2">Expected evidence<textarea name="expected_evidence" placeholder="Optional: describe the evidence Qwen should look for in the student's section."></textarea></label>
+      <div class="span-2"><button class="btn" type="submit">Add Semantic Rule</button></div>
+    </form>
+    <div class="card-list semantic-manual-list" style="margin-top:18px">
+      {% for r in parsed_profile.get('semantic_requirements',[]) if r.get('manual') %}
+      <div class="list-card manual-semantic-card">
+        <div class="row-between"><div><b>{{r.get('requirement')}}</b><span>{{r.get('target_section') or 'Document-wide'}} · {{r.get('final_severity','Mandatory')}}</span><small>Added by {{r.get('created_by','Department/Institute Admin')}}{% if r.get('created_at') %} · {{r.get('created_at')}}</small>{% endif %}</div><span class="badge">Manual</span></div>
+        <details style="margin-top:12px"><summary class="btn ghost small">Edit rule</summary>
+          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/update" class="form-grid cols-2" style="margin-top:12px">
+            <label class="span-2">Requirement text<textarea name="requirement" required>{{r.get('requirement')}}</textarea></label>
+            <label>Target section<input name="target_section" value="{{r.get('target_section','')}}"></label>
+            <label>Severity<select name="severity"><option {% if r.get('final_severity')=='Mandatory' %}selected{% endif %}>Mandatory</option><option {% if r.get('final_severity')=='Warning' %}selected{% endif %}>Warning</option><option {% if r.get('final_severity')=='Recommendation' %}selected{% endif %}>Recommendation</option><option {% if r.get('final_severity')=='Ignore' %}selected{% endif %}>Ignore</option></select></label>
+            <label class="span-2">Expected evidence<textarea name="expected_evidence">{{r.get('expected_evidence') or r.get('evidence','')}}</textarea></label>
+            <div class="span-2 actions"><button class="btn small" type="submit">Save Changes</button></div>
+          </form>
+          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/delete" style="margin-top:8px" onsubmit="return confirm('Delete this manual semantic rule?')"><button class="btn ghost small" type="submit">Delete Rule</button></form>
+        </details>
+      </div>
+      {% else %}<div class="empty-state">No manual semantic rules have been added.</div>{% endfor %}
+    </div>
+  </section>
+
+  {% if parsed_profile.get('review_audit') %}
+  <section class="panel">
+    <div class="panel-head"><div><h2>Recent Rule Review Audit</h2><p>Latest administrator changes to parsed-rule severity.</p></div><span class="badge">{{parsed_profile.get('review_audit',[])|length}} review event(s)</span></div>
+    <div class="card-list">
+      {% for event in parsed_profile.get('review_audit',[])|reverse %}
+      {% if loop.index <= 5 %}<div class="list-card"><div><b>{{event.get('admin_name','Admin')}}</b><span>{{event.get('changed_at','')}}</span><small>{% for c in event.get('changes',[]) %}{{c.get('rule')}}: {{c.get('from')}} → {{c.get('to')}}{% if not loop.last %}; {% endif %}{% endfor %}</small></div></div>{% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <script>
+  (() => {
+    const form=document.getElementById('rule-review-form');
+    if(!form) return;
+    form.querySelectorAll('[data-bulk]').forEach(btn=>btn.addEventListener('click',()=>{
+      const value=btn.dataset.bulk;
+      form.querySelectorAll('.rule-review-card').forEach(card=>{
+        const check=card.querySelector('.rule-check');
+        const select=card.querySelector('.rule-severity');
+        if(check && check.checked && select) select.value=value;
+      });
+    }));
+  })();
+  </script>
+
+  {% if tv.format_profile_status[:6]=='Parsed' %}
+  <section class="panel"><div class="panel-head"><div><h2>Review Before Activation</h2><p>Confirm that the extracted rules faithfully reflect the approved guideline. Admin does not need to re-type them.</p></div><form method="post" action="/admin/template-version/{{tv.id}}/activate-profile"><button class="btn">Activate Parsed Rules</button></form></div></section>
+  {% elif tv.format_profile_status=='Active' %}
+  <div class="alert success">This guideline profile is active. Mandatory parsed rules now contribute to PASS / REVISION REQUIRED.</div>
+  {% endif %}
+
+  <section class="panel"><h2>Optional Additional Restrictions</h2><p class="helper">Use this only for an institutional restriction that is not part of the approved guideline PDF.</p><form method="post" action="/admin/template-version/{{tv.id}}/rules" class="form-grid"><label>Rule name<input name="name" required></label><label>Severity<select name="severity"><option>Mandatory</option><option>Warning</option><option>Recommendation</option></select></label><label>Rule type<select name="validator"><option value="searchable_pdf">Searchable PDF</option><option value="max_file_mb">Maximum file size (MB)</option><option value="min_pages">Minimum pages</option><option value="max_pages">Maximum pages</option><option value="section_present">Required section</option><option value="section_max_words">Section maximum words</option><option value="contains_text">Must contain text</option><option value="a4_page_size">A4 page size</option></select></label><label>Target / Section<input name="target" placeholder="Abstract"></label><label>Expected value<input name="expected" placeholder="20 / 300 / true"></label><button class="btn">Add Additional Restriction</button></form></section>
+
+  <section class="panel"><h2>Active Additional Restrictions</h2><div class="card-list">{% for r in tv.rules %}<div class="list-card"><div><b>{{r.name}}</b><span>{{r.validator}} · {{r.target}} {{r.expected}}</span><small>{{r.source_text}}</small></div><span class="badge">{{r.severity}}</span></div>{% else %}<div class="empty-state">No additional restrictions.</div>{% endfor %}</div></section>
+</main></div>
+{% endblock %}
