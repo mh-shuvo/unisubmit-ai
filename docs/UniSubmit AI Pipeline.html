@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UniSubmit AI Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+Bengali:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --bg:#ECF0EF; --surface:#FFFFFF; --node:#FFFFFF; --node-br:#C6D1CE;
+  --ink:#152220; --muted:#5A6A67; --line:#879895; --rule:#D6DEDC;
+  --accent:#0D6F64; --accent-soft:#DCEDEA; --accent-ink:#0A544C;
+  --pass:#2E7D4F; --warn:#9C6511; --fail:#AE2A21; --nv:#64727C;
+  --shadow:0 1px 2px rgba(18,38,35,.06),0 10px 24px -18px rgba(18,38,35,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0C1312; --surface:#131D1B; --node:#17231F; --node-br:#2F423E;
+    --ink:#E2EBE8; --muted:#93A6A2; --line:#5E7570; --rule:#243331;
+    --accent:#52D3C0; --accent-soft:#143029; --accent-ink:#8DE6D7;
+    --pass:#5CC98A; --warn:#E0A93F; --fail:#F0877E; --nv:#9BAAB3;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 28px -20px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0C1312; --surface:#131D1B; --node:#17231F; --node-br:#2F423E;
+  --ink:#E2EBE8; --muted:#93A6A2; --line:#5E7570; --rule:#243331;
+  --accent:#52D3C0; --accent-soft:#143029; --accent-ink:#8DE6D7;
+  --pass:#5CC98A; --warn:#E0A93F; --fail:#F0877E; --nv:#9BAAB3;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 28px -20px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans","Noto Sans Bengali",system-ui,sans-serif;
+  font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:clamp(28px,5vw,64px) clamp(16px,4vw,40px) 80px}
+h1,h2,h3{font-family:"Bricolage Grotesque","Noto Sans Bengali",system-ui,sans-serif; text-wrap:balance; margin:0}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--accent-ink); margin:0;
+}
+
+/* header */
+header{border-bottom:1px solid var(--rule); padding-bottom:30px; margin-bottom:46px}
+h1{font-size:clamp(40px,7vw,68px); font-weight:800; letter-spacing:-.025em; line-height:1.02; margin:12px 0 0}
+h1 span{color:var(--accent)}
+.lede{max-width:62ch; color:var(--muted); font-size:clamp(16px,1.6vw,18px); margin:16px 0 0}
+.facts{display:flex; flex-wrap:wrap; gap:10px; margin-top:26px}
+.fact{
+  display:flex; flex-direction:column; gap:2px; padding:10px 16px; border-radius:2px;
+  background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--accent);
+}
+.fact b{font-family:"Bricolage Grotesque",sans-serif; font-size:20px; font-weight:700; line-height:1.1}
+.fact span{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+
+/* sections */
+section{margin-top:56px}
+.sechead{display:flex; flex-direction:column; gap:6px; margin-bottom:22px}
+h2{font-size:clamp(23px,3vw,30px); font-weight:600; letter-spacing:-.015em}
+.sechead p{margin:0; color:var(--muted); max-width:68ch}
+
+/* role cards */
+.roles{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.role{background:var(--surface); border:1px solid var(--rule); border-radius:3px; padding:20px 22px; box-shadow:var(--shadow)}
+.role h3{font-size:17px; font-weight:600; display:flex; align-items:center; gap:9px}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--accent); flex:none}
+.role ul{margin:14px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:9px}
+.role li{position:relative; padding-left:18px; font-size:14.5px; color:var(--muted); line-height:1.5}
+.role li::before{content:""; position:absolute; left:0; top:.6em; width:7px; height:1.5px; background:var(--line)}
+.role li b{color:var(--ink); font-weight:500}
+
+/* journey chain */
+.chain{display:flex; flex-wrap:wrap; align-items:stretch; gap:0; margin-top:18px}
+.chain .step{
+  background:var(--surface); border:1px solid var(--node-br); border-radius:3px;
+  padding:11px 15px; font-size:14px; display:flex; align-items:center;
+}
+.chain .step:last-child{border-color:var(--accent); background:var(--accent-soft); color:var(--accent-ink); font-weight:500}
+.chain .arw{display:flex; align-items:center; color:var(--line); padding:0 9px; font-size:15px}
+
+/* figures */
+figure{margin:0; background:var(--surface); border:1px solid var(--rule); border-radius:3px; box-shadow:var(--shadow); overflow:hidden}
+.canvas{overflow-x:auto; padding:26px 24px 10px}
+svg.dg{display:block; width:100%; min-width:640px; height:auto}
+figcaption{border-top:1px solid var(--rule); padding:14px 24px; font-size:13.5px; color:var(--muted)}
+figcaption b{color:var(--ink); font-weight:500}
+
+/* svg styling */
+.dg .node{fill:var(--node); stroke:var(--node-br); stroke-width:1.25}
+.dg .node.soft{fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.25}
+.dg .node.ghost{fill:none; stroke:var(--line); stroke-dasharray:4 4}
+.dg .dec{fill:var(--node); stroke:var(--accent); stroke-width:1.5}
+.dg .store{fill:var(--node); stroke:var(--node-br); stroke-width:1.25}
+.dg .store.ghost{fill:none; stroke:var(--line); stroke-dasharray:4 4}
+.dg text{fill:var(--ink); font-family:"IBM Plex Sans","Noto Sans Bengali",sans-serif; font-size:12.5px; font-weight:500}
+.dg text.sub{fill:var(--muted); font-weight:400; font-size:11.5px}
+.dg text.key{fill:var(--accent-ink); font-weight:600}
+.dg .edge{fill:none; stroke:var(--line); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
+.dg .edge.loop{stroke:var(--accent); stroke-dasharray:6 4}
+.dg .edge.ghost{stroke:var(--line); stroke-dasharray:4 4}
+.dg .elabel{
+  fill:var(--muted); font-family:"IBM Plex Mono","Noto Sans Bengali",monospace; font-size:10.5px;
+  letter-spacing:.04em; paint-order:stroke; stroke:var(--surface); stroke-width:4px; stroke-linejoin:round;
+}
+.dg .elabel.yes{fill:var(--accent-ink); font-weight:600}
+.dg .head{fill:var(--line)}
+.dg .head.acc{fill:var(--accent)}
+
+/* verdict legend */
+.verdicts{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); margin-top:4px}
+.v{background:var(--surface); border:1px solid var(--rule); border-radius:3px; padding:14px 16px; border-top:3px solid var(--vc)}
+.v code{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em; color:var(--vc); font-weight:500}
+.v p{margin:5px 0 0; font-size:13.5px; color:var(--muted)}
+.v.pass{--vc:var(--pass)} .v.fail{--vc:var(--fail)} .v.warn{--vc:var(--warn)} .v.nv{--vc:var(--nv)}
+
+footer{margin-top:60px; padding-top:22px; border-top:1px solid var(--rule); color:var(--muted); font-size:13px}
+
+/* --- architecture additions --- */
+.dg text.mono{font-family:"IBM Plex Mono",monospace; font-size:11.5px}
+.dg .grp{fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:2 6}
+.dg text.grplabel{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.11em; fill:var(--accent-ink); font-weight:600}
+.dg .edge.dead{stroke:var(--fail); stroke-dasharray:5 5}
+.dg .xmark{stroke:var(--fail); stroke-width:1.8; stroke-linecap:round}
+.dg text.deadlabel{fill:var(--fail); font-family:"IBM Plex Mono","Noto Sans Bengali",monospace; font-size:10.5px; paint-order:stroke; stroke:var(--surface); stroke-width:4px; stroke-linejoin:round}
+
+.tablewrap{overflow-x:auto; background:var(--surface); border:1px solid var(--rule); border-radius:3px; box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; min-width:580px; font-size:14px}
+th,td{text-align:left; padding:11px 16px; border-bottom:1px solid var(--rule); vertical-align:top}
+th{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:500}
+tr:last-child td{border-bottom:none}
+td code,li code,p code,figcaption code{font-family:"IBM Plex Mono",monospace; font-size:12.5px; background:var(--accent-soft); color:var(--accent-ink); padding:1px 5px; border-radius:2px}
+td.num-cell{font-variant-numeric:tabular-nums}
+
+.spec{counter-reset:s; list-style:none; margin:0; padding:0; background:var(--surface); border:1px solid var(--rule); border-radius:3px; box-shadow:var(--shadow)}
+.spec li{counter-increment:s; position:relative; padding:14px 20px 14px 60px; border-bottom:1px solid var(--rule); font-size:14.5px}
+.spec li:last-child{border-bottom:none}
+.spec li::before{content:counter(s,decimal-leading-zero); position:absolute; left:20px; top:15px; font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--accent); letter-spacing:.06em}
+
+.nums{display:grid; grid-template-columns:repeat(auto-fit,minmax(152px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden; margin-top:16px}
+.num{background:var(--surface); padding:14px 16px}
+.num b{display:block; font-family:"IBM Plex Mono",monospace; font-size:15px; color:var(--accent-ink); font-variant-numeric:tabular-nums}
+.num span{font-size:12px; color:var(--muted)}
+
+.callout{border-left:3px solid var(--accent); background:var(--accent-soft); padding:14px 18px; border-radius:0 3px 3px 0; font-size:14.5px; margin-top:16px}
+.stack{display:flex; flex-direction:column; gap:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <p class="eyebrow">System map · Guideline → Validation → Report</p>
+  <h1>UniSubmit <span>AI</span></h1>
+  <p class="lede">মূল flowchart-টি পড়ার মতো করে ভাগ করা হয়েছে: কে কী setup করে, একটি submission validation queue-তে ঢুকে কোন দুটি track-এ যাচাই হয়, আর শেষে কোন সিদ্ধান্তে পৌঁছায়। Technical অংশগুলো <b>v9.10.2</b>-এর কোড (<code>app/main.py</code>, <code>ai_service/main.py</code>) থেকে যাচাই করা।</p>
+  <div class="facts">
+    <div class="fact"><b>3</b><span>User roles</span></div>
+    <div class="fact"><b>2</b><span>Validation tracks</span></div>
+    <div class="fact"><b>1</b><span>Job per worker</span></div>
+    <div class="fact"><b>2</b><span>Services</span></div>
+    <div class="fact"><b>1024</b><span>Vector dims</span></div>
+    <div class="fact"><b>4</b><span>Rule verdicts</span></div>
+    <div class="fact"><b>3</b><span>Max retries</span></div>
+  </div>
+</header>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Who does what</p>
+    <h2>তিনটি role, তিনটি entry point</h2>
+    <p>প্রতিটি role আলাদা জায়গা থেকে system-এ ঢোকে, কিন্তু সবাই শেষ পর্যন্ত একই validation pipeline-কে খাওয়ায়।</p>
+  </div>
+  <div class="roles">
+    <div class="role">
+      <h3><span class="dot"></span>Super Admin</h3>
+      <ul>
+        <li><b>Faculty, Department ও Institute</b> তৈরি, তারপর Unit Admin তৈরি করে assign</li>
+        <li><b>System, SMTP ও Security</b> settings</li>
+        <li><b>AI Service Monitoring</b> — Ollama ও Qdrant সচল আছে কি না</li>
+      </ul>
+    </div>
+    <div class="role">
+      <h3><span class="dot"></span>Department / Institute Admin</h3>
+      <ul>
+        <li><b>Program ও Supervisor</b> management</li>
+        <li><b>Submission Type ও Guideline Version</b> setup</li>
+        <li><b>Guideline PDF upload</b> করে parse করা rules review, edit ও activate — Stage 01</li>
+      </ul>
+    </div>
+    <div class="role">
+      <h3><span class="dot"></span>Student</h3>
+      <ul>
+        <li>Register / Login</li>
+        <li><b>Program, Submission Type ও Supervisor</b> নির্বাচন</li>
+        <li>PDF upload করে feedback অনুযায়ী বারবার সংশোধন</li>
+      </ul>
+    </div>
+  </div>
+  <div class="chain" role="list">
+    <div class="step" role="listitem">Register / Login</div><div class="arw" aria-hidden="true">&rarr;</div>
+    <div class="step" role="listitem">Program, Submission Type ও Supervisor নির্বাচন</div><div class="arw" aria-hidden="true">&rarr;</div>
+    <div class="step" role="listitem">Student PDF Upload</div><div class="arw" aria-hidden="true">&rarr;</div>
+    <div class="step" role="listitem">Submission Version Save</div><div class="arw" aria-hidden="true">&rarr;</div>
+    <div class="step" role="listitem">Persistent Validation Queue</div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Deployment · v9.10.2</p>
+    <h2>দুটি service, দুটি engine</h2>
+    <p>Core web app কোনো model চালায় না — সব AI কাজ HTTP দিয়ে AI service-কে দেওয়া হয়, আর সেটি Qdrant ও Ollama-র সঙ্গে কথা বলে। তাই Ollama বা Qdrant বন্ধ থাকলে deterministic validation চলে, শুধু semantic অংশটা আটকায়।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 1080 404" role="img" aria-label="Core web app port 8000 থেকে AI service port 8001-এ HTTP call যায়, আর AI service Qdrant port 6333 ও Ollama port 11434 ব্যবহার করে">
+        <defs>
+          <marker id="ar-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="grp" x="20" y="64" width="300" height="314" rx="10"/>
+        <text class="grplabel" x="20" y="52">CORE WEB APP · :8000</text>
+        <rect class="node" x="40" y="80" width="260" height="46" rx="7"/>
+        <text x="170" y="100" text-anchor="middle">FastAPI + Jinja templates</text>
+        <text x="170" y="115" text-anchor="middle" class="mono sub">app/main.py</text>
+
+        <rect class="node" x="40" y="146" width="260" height="52" rx="7"/>
+        <text x="170" y="168" text-anchor="middle">SQLite — unisubmit.db</text>
+        <text x="170" y="184" text-anchor="middle" class="sub">rules profile, jobs, results</text>
+
+        <rect class="node soft" x="40" y="218" width="260" height="52" rx="7"/>
+        <text x="170" y="240" text-anchor="middle" class="key">queue_worker()</text>
+        <text x="170" y="256" text-anchor="middle" class="sub">একটি asyncio task, sequential</text>
+
+        <rect class="node" x="40" y="290" width="260" height="52" rx="7"/>
+        <text x="170" y="312" text-anchor="middle">storage/</text>
+        <text x="170" y="328" text-anchor="middle" class="sub">submission PDF ও report</text>
+
+        <rect class="grp" x="400" y="64" width="300" height="314" rx="10"/>
+        <text class="grplabel" x="400" y="52">AI SERVICE · :8001</text>
+        <rect class="node" x="420" y="80" width="260" height="40" rx="7"/>
+        <text x="550" y="105" text-anchor="middle" class="mono">POST /guideline/profile</text>
+        <rect class="node" x="420" y="130" width="260" height="40" rx="7"/>
+        <text x="550" y="155" text-anchor="middle" class="mono">POST /rag/index-template</text>
+        <rect class="node" x="420" y="180" width="260" height="40" rx="7"/>
+        <text x="550" y="205" text-anchor="middle" class="mono">POST /rag/validate</text>
+
+        <rect class="node" x="420" y="238" width="260" height="52" rx="7"/>
+        <text x="550" y="260" text-anchor="middle">BGE-M3 embedding model</text>
+        <text x="550" y="276" text-anchor="middle" class="sub">in-process, 1024-dim</text>
+
+        <rect class="node" x="420" y="306" width="260" height="52" rx="7"/>
+        <text x="550" y="328" text-anchor="middle">chunk_text() + prompt builder</text>
+        <text x="550" y="344" text-anchor="middle" class="sub">retrieval, JSON repair</text>
+
+        <path class="store" d="M790 110 a135 12 0 0 1 270 0 v48 a135 12 0 0 1 -270 0 z"/>
+        <path class="store" d="M790 110 a135 12 0 0 0 270 0"/>
+        <text x="925" y="146" text-anchor="middle" class="key">Qdrant · :6333</text>
+        <text x="925" y="162" text-anchor="middle" class="sub">programme-wise collections, cosine</text>
+
+        <rect class="node" x="790" y="230" width="270" height="72" rx="7"/>
+        <text x="925" y="258" text-anchor="middle" class="key">Ollama · :11434</text>
+        <text x="925" y="274" text-anchor="middle" class="sub">qwen3.5:35b</text>
+        <text x="925" y="290" text-anchor="middle" class="sub">num_ctx 16384 · num_predict 4096</text>
+
+        <path class="edge" d="M320 146 H400" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="360" y="138" text-anchor="middle">HTTP · httpx</text>
+        <path class="edge" d="M400 214 H320" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="360" y="232" text-anchor="middle">JSON</text>
+
+        <path class="edge" d="M700 142 H790" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="745" y="134" text-anchor="middle">upsert · search</text>
+        <path class="edge" d="M790 174 H700" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="745" y="192" text-anchor="middle">top-k chunks</text>
+
+        <path class="edge" d="M700 254 H790" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="745" y="246" text-anchor="middle">grounded prompt</text>
+        <path class="edge" d="M790 286 H700" marker-end="url(#ar-e)"/>
+        <text class="elabel" x="745" y="304" text-anchor="middle">JSON</text>
+      </svg>
+    </div>
+    <figcaption><b>Core app কখনো Qdrant বা Ollama-কে সরাসরি ডাকে না.</b> তিনটি endpoint-ই পুরো AI surface: guideline parse, guideline index, আর submission validate। <code>app/ai_service_client.py</code>-তে timeout আলাদা — parse 600s, index 300s, validate 660s; এর বেশি লাগলে job retry-তে যায়।</figcaption>
+  </figure>
+  <div class="tablewrap" style="margin-top:18px">
+    <table>
+      <thead><tr><th>Component</th><th>কাজ</th><th>Technology</th></tr></thead>
+      <tbody>
+        <tr><td><b>Core web app</b></td><td>Auth, admin UI, student submission, job queue, deterministic validation, report ও email</td><td><code>FastAPI</code> + <code>SQLAlchemy</code> + SQLite, port 8000</td></tr>
+        <tr><td><b>AI service</b></td><td>Guideline parse, chunking, embedding, retrieval, LLM prompt ও JSON normalise</td><td><code>FastAPI</code>, port 8001</td></tr>
+        <tr><td><b>Embedding model</b></td><td>Text → 1024-dim dense vector</td><td><code>BAAI/bge-m3</code> (FlagEmbedding)</td></tr>
+        <tr><td><b>Vector DB</b></td><td>Programme-ভিত্তিক collection, cosine similarity search</td><td>Qdrant, port 6333</td></tr>
+        <tr><td><b>LLM</b></td><td>Guideline থেকে rule extraction, submission-এর semantic review</td><td>Qwen <code>qwen3.5:35b</code> via Ollama, port 11434</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Stage 01 · Build time</p>
+    <h2>Guideline PDF থেকে active rules</h2>
+    <p>এটি একবার চলে, submission আসার আগে। একই parse থেকে দুই ধরনের জিনিস বের হয়: যন্ত্র দিয়ে মাপা যায় এমন নিয়ম, আর অর্থ বুঝে যাচাই করতে হয় এমন শর্ত।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 820 712" role="img" aria-label="Guideline PDF upload থেকে parse, deterministic rules ও semantic requirements extract, admin review ও activate, এবং শেষে Active Rules সেট ও Qdrant knowledge base তৈরি হওয়ার flow">
+        <defs>
+          <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="node" x="310" y="16" width="200" height="52" rx="7"/>
+        <text x="410" y="38" text-anchor="middle">Guideline PDF ও</text>
+        <text x="410" y="54" text-anchor="middle">Additional Rules Upload</text>
+
+        <rect class="node" x="310" y="104" width="200" height="52" rx="7"/>
+        <text x="410" y="135" text-anchor="middle">Guideline Parse</text>
+
+        <rect class="node" x="60" y="192" width="200" height="52" rx="7"/>
+        <text x="160" y="214" text-anchor="middle">Deterministic Rules</text>
+        <text x="160" y="230" text-anchor="middle">Extract</text>
+
+        <rect class="node" x="560" y="192" width="200" height="52" rx="7"/>
+        <text x="660" y="214" text-anchor="middle">Semantic Requirements</text>
+        <text x="660" y="230" text-anchor="middle">Extract</text>
+
+        <rect class="node" x="310" y="280" width="200" height="52" rx="7"/>
+        <text x="410" y="302" text-anchor="middle">Admin Review, Edit</text>
+        <text x="410" y="318" text-anchor="middle">ও Activate</text>
+
+        <rect class="node" x="310" y="368" width="200" height="52" rx="7"/>
+        <text x="410" y="390" text-anchor="middle">Manual Rules ও</text>
+        <text x="410" y="406" text-anchor="middle">Restrictions যোগ</text>
+
+        <rect class="node soft" x="60" y="456" width="200" height="52" rx="7"/>
+        <text x="160" y="487" text-anchor="middle" class="key">Active Rules</text>
+
+        <rect class="node" x="560" y="456" width="200" height="52" rx="7"/>
+        <text x="660" y="487" text-anchor="middle">Guideline RAG Indexing</text>
+
+        <rect class="node" x="560" y="544" width="200" height="52" rx="7"/>
+        <text x="660" y="566" text-anchor="middle">PDF Chunks —</text>
+        <text x="660" y="582" text-anchor="middle">BGE-M3 Embeddings</text>
+
+        <path class="store" d="M560 644 a100 12 0 0 1 200 0 v44 a100 12 0 0 1 -200 0 z"/>
+        <path class="store" d="M560 644 a100 12 0 0 0 200 0"/>
+        <text x="660" y="678" text-anchor="middle" class="key">Qdrant Knowledge Base</text>
+
+        <path class="edge" d="M410 68 V104" marker-end="url(#ar-a)"/>
+        <path class="edge" d="M410 156 V174"/>
+        <path class="edge" d="M160 174 H660"/>
+        <path class="edge" d="M160 174 V192" marker-end="url(#ar-a)"/>
+        <path class="edge" d="M660 174 V192" marker-end="url(#ar-a)"/>
+        <text class="elabel" x="250" y="169" text-anchor="middle">মাপা যায় এমন নিয়ম</text>
+        <text class="elabel" x="572" y="169" text-anchor="middle">অর্থগত শর্ত</text>
+
+        <path class="edge" d="M160 244 V262"/>
+        <path class="edge" d="M660 244 V262"/>
+        <path class="edge" d="M160 262 H660"/>
+        <path class="edge" d="M410 262 V280" marker-end="url(#ar-a)"/>
+        <text class="elabel" x="418" y="257">admin যাচাই করে</text>
+
+        <path class="edge" d="M410 332 V368" marker-end="url(#ar-a)"/>
+
+        <path class="edge" d="M410 420 V438"/>
+        <path class="edge" d="M160 438 H660"/>
+        <path class="edge" d="M160 438 V456" marker-end="url(#ar-a)"/>
+        <path class="edge" d="M660 438 V456" marker-end="url(#ar-a)"/>
+        <text class="elabel" x="250" y="433" text-anchor="middle">rule set</text>
+        <text class="elabel" x="572" y="433" text-anchor="middle">retrieval index</text>
+
+        <path class="edge" d="M660 508 V544" marker-end="url(#ar-a)"/>
+        <path class="edge" d="M660 596 V632" marker-end="url(#ar-a)"/>
+        <text class="elabel" x="672" y="620">upsert</text>
+      </svg>
+    </div>
+    <figcaption><b>এক parse, দুই output.</b> বাঁ দিকের শাখা দেয় <b>Active Rules</b> — font, margin, page size-এর মতো সরাসরি মাপা যায় এমন নিয়ম। ডান দিকের শাখা guideline-টিকে chunk করে embed করে <b>Qdrant</b>-এ রাখে, যাতে পরে প্রতিটি section-এর জন্য প্রাসঙ্গিক অংশ তুলে আনা যায়। Stage 02-এ এই দুটোই input হিসেবে ফিরে আসে।</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Stage 01 · ভিতরের কাঠামো</p>
+    <h2>একই PDF, দুটি স্বাধীন pipeline</h2>
+    <p>Admin যখন “Parse &amp; Index Guideline” চাপে, <code>index_guideline()</code> পরপর দুটি pipeline চালায়। দুটোই <b>একই raw PDF</b> থেকে শুরু হয় এবং একটির output অন্যটিতে ঢোকে না — Qwen-এর বের করা rule কখনো embed হয় না, আর Qdrant-এ শুধু guideline-এর মূল লেখাই যায়।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 1080 376" role="img" aria-label="একই guideline PDF থেকে Pipeline A Qwen দিয়ে rules extract করে SQLite-এ রাখে এবং Pipeline B BGE-M3 দিয়ে chunk embed করে Qdrant-এ রাখে; দুটি pipeline-এর মধ্যে কোনো data flow নেই">
+        <defs>
+          <marker id="ar-f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="node" x="40" y="160" width="220" height="56" rx="7"/>
+        <text x="150" y="184" text-anchor="middle">Approved Guideline PDF</text>
+        <text x="150" y="200" text-anchor="middle" class="sub">+ Additional Rules PDF</text>
+
+        <text class="grplabel" x="340" y="26">PIPELINE A — RULE EXTRACTION</text>
+        <rect class="node" x="340" y="36" width="200" height="52" rx="7"/>
+        <text x="440" y="58" text-anchor="middle">PyMuPDF page text</text>
+        <text x="440" y="74" text-anchor="middle" class="sub">page-wise, provenance সহ</text>
+
+        <rect class="node" x="580" y="36" width="200" height="52" rx="7"/>
+        <text x="680" y="58" text-anchor="middle">Qwen parse</text>
+        <text x="680" y="74" text-anchor="middle" class="sub">chunk 3000 / overlap 250</text>
+
+        <rect class="node soft" x="820" y="36" width="220" height="52" rx="7"/>
+        <text x="930" y="58" text-anchor="middle" class="key">Rules JSON → SQLite</text>
+        <text x="930" y="74" text-anchor="middle" class="mono sub">format_profile_json</text>
+
+        <text class="grplabel" x="340" y="278">PIPELINE B — RAG INDEXING</text>
+        <rect class="node" x="340" y="288" width="200" height="52" rx="7"/>
+        <text x="440" y="310" text-anchor="middle">একই raw text</text>
+        <text x="440" y="326" text-anchor="middle" class="sub">LLM ছাড়াই</text>
+
+        <rect class="node" x="580" y="288" width="200" height="52" rx="7"/>
+        <text x="680" y="310" text-anchor="middle">Chunk 1200 / overlap 200</text>
+        <text x="680" y="326" text-anchor="middle" class="sub">→ BGE-M3 embed</text>
+
+        <rect class="node soft" x="820" y="288" width="220" height="52" rx="7"/>
+        <text x="930" y="310" text-anchor="middle" class="key">Qdrant collection</text>
+        <text x="930" y="326" text-anchor="middle" class="sub">1024-dim vectors, batch 64</text>
+
+        <path class="edge" d="M260 188 H300 V62 H340" marker-end="url(#ar-f)"/>
+        <path class="edge" d="M260 188 H300 V314 H340" marker-end="url(#ar-f)"/>
+        <text class="elabel" x="306" y="118">প্রথমে</text>
+        <text class="elabel" x="306" y="248">A সফল হলে তবেই</text>
+
+        <path class="edge" d="M540 62 H580" marker-end="url(#ar-f)"/>
+        <path class="edge" d="M780 62 H820" marker-end="url(#ar-f)"/>
+        <path class="edge" d="M540 314 H580" marker-end="url(#ar-f)"/>
+        <path class="edge" d="M780 314 H820" marker-end="url(#ar-f)"/>
+
+        <path class="edge dead" d="M680 88 V288"/>
+        <path class="xmark" d="M668 176 L692 200"/>
+        <path class="xmark" d="M692 176 L668 200"/>
+        <text class="deadlabel" x="702" y="184">Qwen-এর output কখনো</text>
+        <text class="deadlabel" x="702" y="198">embed হয় না</text>
+      </svg>
+    </div>
+    <figcaption><b>Guideline-first.</b> Parse আগে, index পরে — parse ব্যর্থ হলে <code>format_profile_status</code> হয় <i>Parsing Failed</i> এবং RAG indexing আর চালানোই হয় না। মূল guideline <code>recreate=true</code> দিয়ে collection নতুন করে বানায়, তারপর additional rules PDF <code>recreate=false</code> দিয়ে একই collection-এ যোগ হয়। Admin-এর হাতে লেখা semantic rule re-parse করলেও মুছে যায় না।</figcaption>
+  </figure>
+
+  <div class="callout">প্রতিটি programme পায় <b>আলাদা Qdrant collection</b> — নাম তৈরি হয় <code>slugify(department)_slugify(program)_slugify(submission_type)_slugify(template_version)</code> থেকে, যেমন <code>engineering_computer_science_thesis_v2024</code>। ফলে CS-এর thesis কখনো BBA-র guideline-এর বিরুদ্ধে যাচাই হয় না।</div>
+
+  <div class="nums">
+    <div class="num"><b>3000 / 250</b><span>Parse chunk / overlap (chars)</span></div>
+    <div class="num"><b>1200 / 200</b><span>Index chunk / overlap (chars)</span></div>
+    <div class="num"><b>1024</b><span>Vector dimension</span></div>
+    <div class="num"><b>540s</b><span>Parse budget, তারপর fallback rules</span></div>
+    <div class="num"><b>2 → 4</b><span>চুক্তি ভাঙলে chunk অর্ধেক করে retry</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Stage 02 · Run time</p>
+    <h2>একটি submission, দুটি সমান্তরাল track</h2>
+    <p>Worker একবারে একটি job নেয়। PDF থেকে text ও layout বের করার পর কাজটি দুই ভাগ হয় — একদিকে নিয়ম মিলিয়ে দেখা, অন্যদিকে RAG দিয়ে অর্থ যাচাই — এবং শেষে ফলাফল একত্র হয়।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 1080 884" role="img" aria-label="Validation queue থেকে worker job নিয়ে PDF text extract করে, তারপর deterministic validation ও RAG-ভিত্তিক semantic validation সমান্তরালে চালিয়ে ফলাফল merge করার flow">
+        <defs>
+          <marker id="ar-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <path class="store" d="M420 28 a120 12 0 0 1 240 0 v44 a120 12 0 0 1 -240 0 z"/>
+        <path class="store" d="M420 28 a120 12 0 0 0 240 0"/>
+        <text x="540" y="62" text-anchor="middle">Persistent Validation Queue</text>
+
+        <rect class="node" x="420" y="104" width="240" height="52" rx="7"/>
+        <text x="540" y="126" text-anchor="middle">Worker</text>
+        <text x="540" y="142" text-anchor="middle" class="sub">একবারে একটি Job</text>
+
+        <rect class="node" x="420" y="192" width="240" height="52" rx="7"/>
+        <text x="540" y="214" text-anchor="middle">PDF Text ও Layout Extract</text>
+        <text x="540" y="230" text-anchor="middle" class="sub">student submission</text>
+
+        <rect class="node" x="60" y="280" width="240" height="52" rx="7"/>
+        <text x="180" y="311" text-anchor="middle">Deterministic Validation</text>
+
+        <rect class="node ghost" x="420" y="280" width="240" height="52" rx="7"/>
+        <text x="540" y="305" text-anchor="middle" class="key">Active Rules</text>
+        <text x="540" y="320" text-anchor="middle" class="sub">Stage 01</text>
+
+        <rect class="node" x="780" y="280" width="240" height="52" rx="7"/>
+        <text x="900" y="311" text-anchor="middle">Semantic Validation</text>
+
+        <rect class="node" x="60" y="368" width="240" height="52" rx="7"/>
+        <text x="180" y="390" text-anchor="middle">Font, Margin, Page Size,</text>
+        <text x="180" y="406" text-anchor="middle">Sections ও অন্যান্য Rules</text>
+
+        <rect class="node" x="780" y="368" width="240" height="52" rx="7"/>
+        <text x="900" y="390" text-anchor="middle">Target Section-এর</text>
+        <text x="900" y="406" text-anchor="middle">Student Content Extract</text>
+
+        <path class="store ghost" d="M420 468 a120 12 0 0 1 240 0 v44 a120 12 0 0 1 -240 0 z" fill="none" stroke-dasharray="4 4"/>
+        <path class="store ghost" d="M420 468 a120 12 0 0 0 240 0" fill="none" stroke-dasharray="4 4"/>
+        <text x="540" y="498" text-anchor="middle" class="key">Qdrant Knowledge Base</text>
+        <text x="540" y="513" text-anchor="middle" class="sub">Stage 01</text>
+
+        <rect class="node" x="780" y="456" width="240" height="52" rx="7"/>
+        <text x="900" y="478" text-anchor="middle">Relevant Guideline</text>
+        <text x="900" y="494" text-anchor="middle">Context Retrieve</text>
+
+        <rect class="node" x="780" y="544" width="240" height="52" rx="7"/>
+        <text x="900" y="566" text-anchor="middle">Ollama / Qwen</text>
+        <text x="900" y="582" text-anchor="middle">Semantic Review</text>
+
+        <rect class="node" x="780" y="632" width="240" height="52" rx="7"/>
+        <text x="900" y="654" text-anchor="middle">JSON Parse ও Validate</text>
+        <text x="900" y="670" text-anchor="middle" class="sub">প্রয়োজনে একবার Repair</text>
+
+        <rect class="node soft" x="780" y="720" width="240" height="52" rx="7"/>
+        <text x="900" y="742" text-anchor="middle" class="key">প্রতি Rule: PASS / FAIL /</text>
+        <text x="900" y="758" text-anchor="middle" class="key">WARNING / NOT VERIFIED</text>
+
+        <rect class="node" x="420" y="808" width="240" height="52" rx="7"/>
+        <text x="540" y="830" text-anchor="middle">Results Merge ও</text>
+        <text x="540" y="846" text-anchor="middle">Duplicate Findings Consolidate</text>
+
+        <path class="edge" d="M540 84 V104" marker-end="url(#ar-b)"/>
+        <path class="edge" d="M540 156 V192" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="552" y="178">claim job</text>
+
+        <path class="edge" d="M540 244 V262"/>
+        <path class="edge" d="M180 262 H900"/>
+        <path class="edge" d="M180 262 V280" marker-end="url(#ar-b)"/>
+        <path class="edge" d="M900 262 V280" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="300" y="257" text-anchor="middle">layout ও metadata</text>
+        <text class="elabel" x="780" y="257" text-anchor="middle">section text</text>
+
+        <path class="edge ghost" d="M420 306 H306" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="363" y="300" text-anchor="middle">নিয়ম</text>
+
+        <path class="edge" d="M180 332 V368" marker-end="url(#ar-b)"/>
+        <path class="edge" d="M900 332 V368" marker-end="url(#ar-b)"/>
+        <path class="edge" d="M900 420 V456" marker-end="url(#ar-b)"/>
+
+        <path class="edge ghost" d="M660 484 H774" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="717" y="478" text-anchor="middle">top-k context</text>
+
+        <path class="edge" d="M900 508 V544" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="912" y="530">prompt</text>
+        <path class="edge" d="M900 596 V632" marker-end="url(#ar-b)"/>
+        <path class="edge" d="M900 684 V720" marker-end="url(#ar-b)"/>
+
+        <path class="edge" d="M180 420 V790"/>
+        <text class="elabel" x="192" y="600">deterministic</text>
+        <text class="elabel" x="192" y="614">findings</text>
+        <path class="edge" d="M900 772 V790"/>
+        <path class="edge" d="M180 790 H900"/>
+        <path class="edge" d="M540 790 V808" marker-end="url(#ar-b)"/>
+        <text class="elabel" x="700" y="785" text-anchor="middle">semantic findings</text>
+      </svg>
+    </div>
+    <figcaption><b>দুই track কখনো একে অপরের জন্য অপেক্ষা করে না।</b> বাঁ দিকটি সম্পূর্ণ deterministic — Active Rules-এর সঙ্গে মাপ মিলিয়ে দেখা। ডান দিকটি RAG: student-এর section text নিয়ে Qdrant থেকে সংশ্লিষ্ট guideline অংশ তুলে এনে Ollama/Qwen-কে দেওয়া হয়, উত্তর JSON হিসেবে parse হয় এবং ভাঙা থাকলে <b>একবারই</b> repair করা হয়। দুই দিকের finding merge করে duplicate বাদ দেওয়া হয়।</figcaption>
+  </figure>
+
+  <div class="verdicts">
+    <div class="v pass"><code>PASS</code><p>নিয়মটি মানা হয়েছে, কোনো action দরকার নেই।</p></div>
+    <div class="v fail"><code>FAIL</code><p>নিয়ম ভাঙা হয়েছে। Mandatory rule হলে সরাসরি revision।</p></div>
+    <div class="v warn"><code>WARNING</code><p>সন্দেহজনক, কিন্তু submission আটকায় না।</p></div>
+    <div class="v nv"><code>NOT VERIFIED</code><p>যাচাই করা যায়নি — যেমন section খুঁজে পাওয়া যায়নি বা model উত্তর দেয়নি।</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Stage 02 · ভিতরের কাঠামো</p>
+    <h2>Retrieval ঠিক কীভাবে হয়</h2>
+    <p><code>POST /rag/validate</code>-এর ভিতরে ধাপগুলো এই ক্রমে চলে। মূল কৌশল হলো দুই স্তরের retrieval — একটি সাধারণ query, আর তার উপরে প্রতিটি requirement-এর জন্য আলাদা query।</p>
+  </div>
+  <ol class="spec">
+    <li>Department, programme, submission type ও template version থেকে <b>collection name</b> তৈরি হয়; সেই collection না থাকলে সরাসরি error।</li>
+    <li>সর্বোচ্চ <b>৮০টি semantic requirement</b> গ্রহণ করা হয় — <code>Ignore</code> বা disabled rule বাদ, duplicate merge, প্রত্যেকের জন্য stable <code>semantic_id</code>।</li>
+    <li>প্রতিটি requirement-এর <b>target section</b> ধরে student PDF থেকে ঠিক ওই অংশের লেখা আলাদা করে বের করা হয় — পুরো document নয়।</li>
+    <li>সাধারণ query দিয়ে Qdrant থেকে <b>top 10</b> chunk আনা হয় (BGE-M3 দিয়ে query embed করে cosine similarity)।</li>
+    <li>তারপর প্রথম <b>৪০টি requirement</b>-এর প্রত্যেকটিকে আলাদা query হিসেবে ব্যবহার করে আরও <b>top 3</b> করে আনা হয়।</li>
+    <li>সব hit <code>(page, text)</code> ধরে dedupe হয়, score অনুযায়ী sort হয়ে <b>top 40</b> রাখা হয়। একটিও hit না পেলে 404 — job তখন retry-তে যায়।</li>
+    <li>Prompt-এ যায় তিনটি জিনিস: page ও score সহ <b>approved guideline context</b>, requirement-ভিত্তিক <b>targeted student evidence</b>, আর fallback হিসেবে student-এর ১৮,০০০ অক্ষর পর্যন্ত লেখা।</li>
+    <li>Qwen JSON ফেরত দেয়। ভাঙা থাকলে <b>একবারই</b> repair prompt যায়; তাতেও না হলে 502 এবং job retry।</li>
+    <li>ফেরত আসা status normalise হয়: অচেনা কিছু হলে <code>NOT VERIFIED</code>, আর non-mandatory rule-এ <code>FAIL</code> এলে সেটি <code>WARNING</code>-এ নামানো হয় — <b>শুধু Mandatory FAIL-ই submission আটকায়</b>।</li>
+  </ol>
+  <div class="nums">
+    <div class="num"><b>10</b><span>General query hits</span></div>
+    <div class="num"><b>3 × 40</b><span>Per-requirement hits</span></div>
+    <div class="num"><b>40</b><span>Prompt-এ সর্বোচ্চ source</span></div>
+    <div class="num"><b>30,000</b><span>Student text পাঠানো হয় (chars)</span></div>
+    <div class="num"><b>1</b><span>JSON repair attempt</span></div>
+  </div>
+  <div class="callout">Deterministic দিকটি সম্পূর্ণ আলাদা কোডপথ: <code>inspect_pdf()</code> font, margin, spacing ও section তুলে আনে, <code>run_rules()</code> admin-এর manual restriction মেলায়, আর <code>validate_all_profile_rules()</code> parse করা profile মেলায় — তবে শুধু তখনই, যখন profile status <code>Active</code>। Profile activate না করলে formatting check চুপচাপ বাদ পড়ে যায়।</div>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Stage 03 · Outcome</p>
+    <h2>সিদ্ধান্ত ও সংশোধনের চক্র</h2>
+    <p>একটিই প্রশ্ন পুরো ফলাফলকে দুই দিকে ভাগ করে: কোনো <b>mandatory</b> rule fail করেছে কি না।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 1080 724" role="img" aria-label="Mandatory rule fail থাকলে revision required হয়ে student আবার upload করে, না থাকলে final status নির্ধারণ হয় এবং passed হলে supervisor-কে email যায়">
+        <defs>
+          <marker id="ar-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+          <marker id="ar-c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head acc" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="node ghost" x="420" y="16" width="240" height="52" rx="7"/>
+        <text x="540" y="40" text-anchor="middle">Results Merge</text>
+        <text x="540" y="56" text-anchor="middle" class="sub">Stage 02</text>
+
+        <polygon class="dec" points="540,104 680,132 540,160 400,132"/>
+        <text x="540" y="136" text-anchor="middle">Mandatory Rule FAIL আছে?</text>
+
+        <rect class="node" x="60" y="196" width="240" height="52" rx="7"/>
+        <text x="180" y="227" text-anchor="middle">REVISION REQUIRED</text>
+
+        <rect class="node" x="780" y="196" width="240" height="52" rx="7"/>
+        <text x="900" y="227" text-anchor="middle">Final Status নির্ধারণ</text>
+
+        <rect class="node" x="60" y="284" width="240" height="52" rx="7"/>
+        <text x="180" y="306" text-anchor="middle">Dashboard Feedback ও</text>
+        <text x="180" y="322" text-anchor="middle">PDF Report</text>
+
+        <polygon class="dec" points="900,284 1020,312 900,340 780,312"/>
+        <text x="900" y="316" text-anchor="middle">Final Status PASSED?</text>
+
+        <polygon class="dec" points="180,372 300,400 180,428 60,400"/>
+        <text x="180" y="404" text-anchor="middle">Student সংশোধন করবে?</text>
+
+        <rect class="node soft" x="780" y="372" width="240" height="52" rx="7"/>
+        <text x="900" y="394" text-anchor="middle" class="key">Supervisor-কে Submission</text>
+        <text x="900" y="410" text-anchor="middle" class="key">ও Report Email</text>
+
+        <rect class="node" x="60" y="460" width="240" height="52" rx="7"/>
+        <text x="180" y="484" text-anchor="middle">Student PDF Upload</text>
+        <text x="180" y="500" text-anchor="middle" class="sub">নতুন version</text>
+
+        <rect class="node" x="60" y="548" width="240" height="52" rx="7"/>
+        <text x="180" y="579" text-anchor="middle">Submission Version Save</text>
+
+        <rect class="node soft" x="60" y="636" width="240" height="52" rx="7"/>
+        <text x="180" y="660" text-anchor="middle" class="key">Persistent Validation Queue</text>
+        <text x="180" y="676" text-anchor="middle" class="sub">Stage 02 আবার শুরু</text>
+
+        <path class="edge" d="M540 68 V104" marker-end="url(#ar-c)"/>
+        <path class="edge" d="M540 160 V178"/>
+        <path class="edge" d="M180 178 H900"/>
+        <path class="edge" d="M180 178 V196" marker-end="url(#ar-c)"/>
+        <path class="edge" d="M900 178 V196" marker-end="url(#ar-c)"/>
+        <text class="elabel yes" x="300" y="173" text-anchor="middle">হ্যাঁ</text>
+        <text class="elabel yes" x="780" y="173" text-anchor="middle">না</text>
+
+        <path class="edge" d="M180 248 V284" marker-end="url(#ar-c)"/>
+        <path class="edge" d="M900 248 V284" marker-end="url(#ar-c)"/>
+        <path class="edge" d="M780 222 H540 V310 H304" marker-end="url(#ar-c)"/>
+        <text class="elabel" x="660" y="216" text-anchor="middle">feedback ও report</text>
+
+        <path class="edge" d="M900 340 V372" marker-end="url(#ar-c)"/>
+        <text class="elabel yes" x="912" y="360">হ্যাঁ</text>
+
+        <path class="edge" d="M780 312 H640 V398 H304" marker-end="url(#ar-c)"/>
+        <text class="elabel yes" x="672" y="306">না</text>
+
+        <path class="edge" d="M180 336 V372" marker-end="url(#ar-c)"/>
+        <path class="edge" d="M180 428 V460" marker-end="url(#ar-c)"/>
+        <text class="elabel yes" x="192" y="448">হ্যাঁ</text>
+        <path class="edge" d="M180 512 V548" marker-end="url(#ar-c)"/>
+        <path class="edge loop" d="M180 600 V636" marker-end="url(#ar-c2)"/>
+      </svg>
+    </div>
+    <figcaption><b>লুপটিই মূল কথা.</b> Mandatory fail মানে সরাসরি REVISION REQUIRED; না হলে final status বসে। দুই ক্ষেত্রেই student dashboard-এ feedback ও PDF report পায়, এবং নতুন version upload করলে সেটি আবার queue-তে ঢুকে পুরো Stage 02 আবার চালায়। শুধু <b>PASSED</b> অবস্থাতেই supervisor-কে submission ও report email করা হয়।</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Cross-cutting · Failure path</p>
+    <h2>Processing error হলে কী হয়</h2>
+    <p>Validation নিজেই ভেঙে গেলে (model down, corrupt PDF, timeout) job হারিয়ে যায় না — সীমিত সংখ্যক বার আবার চেষ্টা করা হয়।</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg class="dg" viewBox="0 0 880 300" role="img" aria-label="Processing error হলে সর্বোচ্চ তিনটি attempt পর্যন্ত job retry হয়; attempt বাকি থাকলে queue-তে ফেরে, শেষ attempt ব্যর্থ হলে failed status ও error details রাখা হয়">
+        <defs>
+          <marker id="ar-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+          <marker id="ar-d2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="head acc" d="M0 0 L10 5 L0 10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="node" x="40" y="122" width="200" height="52" rx="7"/>
+        <text x="140" y="153" text-anchor="middle">Processing Error</text>
+
+        <polygon class="dec" points="440,116 570,148 440,180 310,148"/>
+        <text x="440" y="146" text-anchor="middle">Job Retry</text>
+        <text x="440" y="162" text-anchor="middle" class="sub">সর্বোচ্চ ৩টি Attempt</text>
+
+        <rect class="node soft" x="640" y="40" width="200" height="52" rx="7"/>
+        <text x="740" y="64" text-anchor="middle" class="key">Persistent Validation</text>
+        <text x="740" y="80" text-anchor="middle" class="key">Queue</text>
+
+        <rect class="node" x="640" y="204" width="200" height="52" rx="7"/>
+        <text x="740" y="226" text-anchor="middle">Failed Status ও</text>
+        <text x="740" y="242" text-anchor="middle">Error Details</text>
+
+        <path class="edge" d="M240 148 H310" marker-end="url(#ar-d)"/>
+        <path class="edge loop" d="M570 148 H600 V66 H640" marker-end="url(#ar-d2)"/>
+        <text class="elabel yes" x="604" y="106">attempt বাকি</text>
+        <path class="edge" d="M570 148 H600 V230 H640" marker-end="url(#ar-d)"/>
+        <text class="elabel" x="604" y="196">শেষ attempt ব্যর্থ</text>
+      </svg>
+    </div>
+    <figcaption><b>Retry শেষ হলেই তবে failure.</b> প্রতি attempt-এ job আবার queue-তে ফিরে যায় এবং worker নতুন করে শুরু করে। তৃতীয় attempt-ও ব্যর্থ হলে submission-টি <b>Failed</b> হিসেবে চিহ্নিত হয় এবং error details রেখে দেওয়া হয়, যাতে admin AI service monitoring থেকে কারণ দেখতে পারে।</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">Code map</p>
+    <h2>কোন ফাইল কোন ধাপ চালায়</h2>
+    <p>উপরের প্রতিটি box-এর পিছনে কোন function আছে, একনজরে।</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>File</th><th>দায়িত্ব</th><th>মূল function</th></tr></thead>
+      <tbody>
+        <tr><td><code>app/main.py</code></td><td>সব route, guideline parse+index trigger, persistent queue worker ও job প্রক্রিয়া</td><td><code>index_guideline()</code>, <code>queue_worker()</code>, <code>process_job()</code></td></tr>
+        <tr><td><code>app/pdf_utils.py</code></td><td>PDF থেকে font, margin, spacing, page ও section তথ্য বের করা</td><td><code>inspect_pdf()</code></td></tr>
+        <tr><td><code>app/validators.py</code></td><td>Admin-এর manual deterministic restriction যাচাই</td><td><code>run_rules()</code></td></tr>
+        <tr><td><code>app/format_validation.py</code></td><td>Parse করা profile-এর formatting rule যাচাই, cover page ও heading মিলিয়ে দেখা</td><td><code>validate_all_profile_rules()</code></td></tr>
+        <tr><td><code>app/ai_service_client.py</code></td><td>AI service-এর তিনটি call ও তাদের timeout</td><td><code>parse_guideline_profile()</code>, <code>index_template()</code>, <code>rag_validate()</code></td></tr>
+        <tr><td><code>ai_service/main.py</code></td><td>Chunking, embedding, Qdrant upsert ও retrieval, Qwen prompt ও JSON repair</td><td><code>_parse_guideline_chunks()</code>, <code>retrieve_chunks()</code>, <code>make_collection_name()</code></td></tr>
+        <tr><td><code>app/reporting.py</code></td><td>Validation report PDF তৈরি</td><td><code>build_validation_report()</code></td></tr>
+        <tr><td><code>app/emailer.py</code></td><td>PASSED হলে supervisor-কে submission ও report পাঠানো</td><td><code>send_submission_email()</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>মূল হাতে আঁকা flowchart থেকে পুনর্গঠিত; architecture, সংখ্যা ও function-এর নাম <code>UniSubmit_AI_v9_10_2_Guideline_Parser_Fix</code>-এর কোড পড়ে যাচাই করা (<code>app/main.py</code>, <code>ai_service/main.py</code>, <code>app/ai_service_client.py</code>) এবং <code>docs/RAG_ARCHITECTURE.md</code>-এর সঙ্গে মেলানো।</footer>
+</div>
+</body>
+</html>
