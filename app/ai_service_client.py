@@ -1,7 +1,12 @@
 import logging
+import os
 import httpx
 
 logger = logging.getLogger("uvicorn.error")
+
+# Semantic validation runs one local-LLM call per batch of rules, so the budget
+# scales with the size of the guideline's rule set rather than a single request.
+RAG_VALIDATE_TIMEOUT = float(os.getenv("RAG_VALIDATE_TIMEOUT", "1800"))
 
 
 async def health(service_url: str) -> dict:
@@ -16,7 +21,7 @@ async def health(service_url: str) -> dict:
 
 async def rag_validate(service_url: str, payload: dict):
     try:
-        async with httpx.AsyncClient(timeout=660) as c:
+        async with httpx.AsyncClient(timeout=RAG_VALIDATE_TIMEOUT) as c:
             r = await c.post(service_url.rstrip("/") + "/rag/validate", json=payload)
             r.raise_for_status()
             return r.json()

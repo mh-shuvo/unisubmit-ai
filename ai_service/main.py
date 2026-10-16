@@ -33,6 +33,23 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 
 VECTOR_SIZE = 1024
 
+# Per-rule targeted student evidence is repeated once per semantic rule, so this
+# cap bounds the prompt as the rule set grows.
+SECTION_EVIDENCE_CHARS = int(os.getenv("SEMANTIC_SECTION_CHARS", "3000"))
+# Semantic rules are validated in batches. One prompt carrying every rule
+# overflows both the context window and the output budget, and Ollama truncates
+# silently, which turns every rule into NOT VERIFIED.
+SEMANTIC_BATCH_SIZE = int(os.getenv("SEMANTIC_BATCH_SIZE", "12"))
+SEMANTIC_CONTEXT_CHUNKS = int(os.getenv("SEMANTIC_CONTEXT_CHUNKS", "12"))
+SEMANTIC_STUDENT_CHARS = int(os.getenv("SEMANTIC_STUDENT_CHARS", "14000"))
+# Rough chars-per-token used only to warn before Ollama silently truncates a
+# prompt that exceeds num_ctx.
+CHARS_PER_TOKEN = 3.5
+# One Ollama call now covers a whole batch of semantic rules, so it runs far
+# longer than the single-shot calls the old 300 s cap was sized for. A batch
+# that overruns surfaces as an empty-message 503 and loses the whole job.
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "900"))
+
 embedding_model = None
 embedding_status = "not_loaded"
 embedding_error = None
@@ -296,14 +313,31 @@ class IncompleteOllamaResponse(ValueError):
 
 
 async def call_ollama(model: str, prompt: str, json_mode: bool = False) -> str:
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+    num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
+    # Ollama truncates an oversized prompt from the front without reporting it,
+    # which silently drops the instructions and schema and makes every rule come
+    # back NOT VERIFIED. Log it instead of failing a submission mysteriously.
+    budget = num_ctx - num_predict
+    estimated_tokens = int(len(prompt) / CHARS_PER_TOKEN)
+    if estimated_tokens > budget:
+        logger.warning(
+            "Prompt likely exceeds context budget model=%s prompt_chars=%s "
+            "estimated_tokens=%s num_ctx=%s usable_budget=%s; Ollama will truncate",
+            model,
+            len(prompt),
+            estimated_tokens,
+            num_ctx,
+            budget,
+        )
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {
             "temperature": 0,
-            "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "16384")),
-            "num_predict": int(os.getenv("OLLAMA_NUM_PREDICT", "4096")),
+            "num_ctx": num_ctx,
+            "num_predict": num_predict,
         },
     }
     if json_mode:
@@ -311,7 +345,7 @@ async def call_ollama(model: str, prompt: str, json_mode: bool = False) -> str:
         payload["format"] = "json"
         # Avoid spending the structured-output budget on Qwen reasoning.
         payload["think"] = os.getenv("OLLAMA_JSON_THINK", "false").lower() == "true"
-    async with httpx.AsyncClient(timeout=300) as client:
+    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
         response = await client.post(
             OLLAMA_URL.rstrip("/") + "/api/generate",
             json=payload,
@@ -653,14 +687,14 @@ def _dedupe_semantic_rules(rules: list[dict]) -> list[dict]:
 def _extract_target_section(student_text: str, target_section: str) -> str:
     """Best-effort section extraction from plain PDF text.
 
-    Falls back to the full student document when a target section cannot be safely
-    isolated. This reduces NOT VERIFIED results without pretending a missing section
-    was found.
+    Returns "" when there is no target section to isolate. The full document is
+    already supplied once in the prompt, so returning it here would repeat it for
+    every rule and overflow the model's context window.
     """
     text = student_text or ""
     target = (target_section or "").strip()
     if not target:
-        return text[:30000]
+        return ""
     lines = text.splitlines()
     norm_target = _semantic_norm(target)
     start = None
@@ -691,7 +725,9 @@ def _extract_target_section(student_text: str, target_section: str) -> str:
             if (is_caps or is_chapter) and len(out) > 3:
                 break
         out.append(lines[j])
-    return "\n".join(out).strip()[:18000]
+    # Kept small on purpose: this text is repeated once per rule, so a generous
+    # cap here multiplies across the rule set and overflows the context window.
+    return "\n".join(out).strip()[:SECTION_EVIDENCE_CHARS]
 
 
 # -----------------------------
@@ -791,9 +827,15 @@ async def rag_validate(request: ValidateRAGRequest):
             semantic_id += f"-{idx}"
         req["semantic_id"] = semantic_id
         used_ids.add(semantic_id)
-        req["student_section_text"] = _extract_target_section(
+        # Only carry targeted evidence when a section was actually isolated. An
+        # empty value would repeat the whole document once per rule.
+        section_text = _extract_target_section(
             request.student_text, req.get("target_section", "")
         )
+        if section_text:
+            req["student_section_text"] = section_text
+        else:
+            req.pop("student_section_text", None)
     try:
         hits = retrieve_chunks(collection_name, request.query, request.limit)
         seen = {(h.get("page"), h.get("text")) for h in hits}
@@ -803,7 +845,9 @@ async def rag_validate(request: ValidateRAGRequest):
                 if k not in seen:
                     seen.add(k)
                     hits.append(h)
-        hits = sorted(hits, key=lambda x: x.get("score", 0), reverse=True)[:40]
+        hits = sorted(hits, key=lambda x: x.get("score", 0), reverse=True)[
+            :SEMANTIC_CONTEXT_CHUNKS
+        ]
     except Exception as e:
         logger.exception("RAG retrieval failed collection=%s", collection_name)
         code = 404 if getattr(e, "status_code", None) == 404 else 503
@@ -819,62 +863,86 @@ async def rag_validate(request: ValidateRAGRequest):
         f"[SOURCE {i} | Page {h['page']} | Score {h['score']:.4f}]\n{h['text']}"
         for i, h in enumerate(hits, 1)
     )
-    prompt = f"""You are UniSubmit's academic pre-submission validation assistant.
+    batches = [
+        explicit[i : i + SEMANTIC_BATCH_SIZE]
+        for i in range(0, len(explicit), SEMANTIC_BATCH_SIZE)
+    ] or [[]]
+    returned = {}
+    suggestion_pool = []
+    grounding_notes = []
+    failed_batches = []
+    for batch_no, batch in enumerate(batches, start=1):
+        prompt = f"""You are UniSubmit's academic pre-submission validation assistant.
 Use ONLY the approved guideline context below. Never invent a requirement. Evaluate EVERY parsed semantic requirement exactly once.
-For each rule, inspect its student_section_text first. If that targeted section is non-empty, make a PASS/FAIL/WARNING decision from that evidence rather than defaulting to NOT VERIFIED. Use NOT VERIFIED only when the target section is genuinely missing/unreadable or the available student evidence is too ambiguous for a defensible decision. For manual semantic rules, use expected_evidence when provided as a cue for what evidence to look for; do not treat it as student evidence.
+For each rule, inspect its student_section_text first. If that targeted section is non-empty, make a PASS/FAIL/WARNING decision from that evidence rather than defaulting to NOT VERIFIED. When a rule has no student_section_text field, use FULL STUDENT CONTENT below as its evidence and still make a decision. Use NOT VERIFIED only when the evidence needed is genuinely absent from the student document, or the requirement is about something a text extract cannot show (print quality, paper, binding, colour). For manual semantic rules, use expected_evidence when provided as a cue for what evidence to look for; do not treat it as student evidence.
+Return exactly {len(batch)} objects, one per rule below, echoing each semantic_id EXACTLY as given. Do not invent or renumber semantic_id values.
 Status rules: satisfied=PASS; unmet Mandatory=FAIL; unmet Warning/Recommendation=WARNING; insufficient evidence=NOT VERIFIED. Only Mandatory+FAIL blocks.
 Return VALID JSON ONLY:
-{{"semantic_results":[{{"semantic_id":"SEM-001","requirement":"...","severity":"Mandatory|Warning|Recommendation","status":"PASS|FAIL|WARNING|NOT VERIFIED","message":"...","detected_evidence":"...","correction":"...","source_page":1,"source_section":"...","source_evidence":"...","confidence":0.0}}],"improvement_suggestions":["..."],"grounding_note":"..."}}
-PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(explicit, ensure_ascii=False)}\n\nAPPROVED GUIDELINE CONTEXT:\n{context}\n\nFULL STUDENT CONTENT (fallback only):\n{request.student_text[:18000]}"""
-    try:
-        raw = await call_ollama(request.base_model, prompt, json_mode=True)
-    except Exception as e:
-        logger.exception(
-            "Ollama semantic generation failed model=%s", request.base_model
-        )
-        raise HTTPException(
-            status_code=503, detail=f"Local LLM unavailable: {e}"
-        ) from e
-    try:
-        payload = _validation_payload(raw)
-    except ValueError as initial_error:
-        # Log shape/length only; student text and model output are private.
-        logger.warning(
-            "Qwen semantic JSON invalid (%s); response_chars=%s; repairing once",
-            initial_error,
-            len(raw),
-        )
-        repair = (
-            "Repair into valid JSON only. Return an object with semantic_results "
-            "(array of objects with semantic_id, status, message, detected_evidence, "
-            "correction), improvement_suggestions (array of strings), grounding_note "
-            "(string). Do not invent content.\n\n" + raw[:24000]
-        )
+{{"semantic_results":[{{"semantic_id":"SEM-001","status":"PASS|FAIL|WARNING|NOT VERIFIED","message":"one sentence","detected_evidence":"short quote from the student document","correction":"only when FAIL","confidence":0.0}}],"improvement_suggestions":["..."],"grounding_note":"..."}}
+Do not repeat the requirement text, severity or source fields back; the server already holds them. Keep message and detected_evidence under 200 characters each.
+PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch, ensure_ascii=False)}\n\nAPPROVED GUIDELINE CONTEXT:\n{context}\n\nFULL STUDENT CONTENT (fallback only):\n{request.student_text[:SEMANTIC_STUDENT_CHARS]}"""
         try:
-            repaired = await call_ollama(request.base_model, repair, json_mode=True)
-        except Exception as exc:
+            raw = await call_ollama(request.base_model, prompt, json_mode=True)
+        except Exception as e:
             logger.exception(
-                "Ollama JSON repair request failed model=%s", request.base_model
-            )
-            raise HTTPException(
-                status_code=503, detail=f"Local LLM repair unavailable: {exc}"
-            ) from exc
-        try:
-            payload = _validation_payload(repaired)
-        except ValueError as exc:
-            logger.exception(
-                "Qwen semantic JSON invalid after repair model=%s response_chars=%s",
+                "Ollama semantic generation failed model=%s batch=%s/%s",
                 request.base_model,
-                len(repaired),
+                batch_no,
+                len(batches),
             )
+            # str() on a timeout is empty, which yields a detail with no reason at
+            # all. Always name the exception type and which batch overran.
             raise HTTPException(
-                status_code=502,
-                detail=f"Semantic validation JSON invalid after one repair: {exc}",
-            ) from exc
-    returned = {
-        str(x.get("semantic_id")): x
-        for x in (payload.get("semantic_results") or [])
-        if isinstance(x, dict) and x.get("semantic_id")
+                status_code=503,
+                detail=f"Local LLM unavailable on semantic batch {batch_no}/{len(batches)}: "
+                       f"{type(e).__name__}: {e}".rstrip(': '),
+            ) from e
+        try:
+            payload = _validation_payload(raw)
+        except ValueError as initial_error:
+            # Log shape/length only; student text and model output are private.
+            logger.warning(
+                "Qwen semantic JSON invalid (%s) batch=%s/%s; response_chars=%s; repairing once",
+                initial_error,
+                batch_no,
+                len(batches),
+                len(raw),
+            )
+            repair = (
+                "Repair into valid JSON only. Return an object with semantic_results "
+                "(array of objects with semantic_id, status, message, detected_evidence, "
+                "correction), improvement_suggestions (array of strings), grounding_note "
+                "(string). Do not invent content.\n\n" + raw[:24000]
+            )
+            try:
+                repaired = await call_ollama(request.base_model, repair, json_mode=True)
+                payload = _validation_payload(repaired)
+            except Exception as exc:
+                # One unusable batch must not discard the batches that succeeded;
+                # its rules stay NOT VERIFIED and the gap is reported.
+                logger.exception(
+                    "Qwen semantic JSON unusable after repair model=%s batch=%s/%s",
+                    request.base_model,
+                    batch_no,
+                    len(batches),
+                )
+                failed_batches.append(batch_no)
+                continue
+        for x in payload.get("semantic_results") or []:
+            if isinstance(x, dict) and x.get("semantic_id"):
+                returned[str(x.get("semantic_id"))] = x
+        suggestion_pool.extend(payload.get("improvement_suggestions") or [])
+        note = str(payload.get("grounding_note") or "").strip()
+        if note:
+            grounding_notes.append(note)
+    if failed_batches and len(failed_batches) == len(batches):
+        raise HTTPException(
+            status_code=502,
+            detail="Semantic validation JSON invalid after one repair for every batch",
+        )
+    payload = {
+        "improvement_suggestions": suggestion_pool,
+        "grounding_note": " ".join(grounding_notes),
     }
     semantic = []
     for req in explicit:
@@ -964,6 +1032,11 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(explic
         ]
     if not suggestions:
         suggestions = ["No additional improvement suggestion was generated."]
+    if failed_batches:
+        grounding = (
+            f"{grounding} Note: {len(failed_batches)} of {len(batches)} semantic "
+            "batches returned unusable output, so some rules remain NOT VERIFIED."
+        ).strip()
     response = (
         "## COMPLIANCE ASSESSMENT\n"
         + "\n".join(comp)
@@ -986,6 +1059,8 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(explic
         "response": response,
         "semantic_results": semantic,
         "semantic_overall_status": overall,
+        "semantic_batches": len(batches),
+        "semantic_batches_failed": failed_batches,
     }
 
 
