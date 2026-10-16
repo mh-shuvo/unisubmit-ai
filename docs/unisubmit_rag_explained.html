@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UniSubmit AI — Architecture & RAG Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#0d1117',
+        primaryColor: '#1f6feb',
+        primaryTextColor: '#f0f6fc',
+        primaryBorderColor: '#388bfd',
+        lineColor: '#58a6ff',
+        secondaryColor: '#161b22',
+        tertiaryColor: '#21262d'
+      }
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --heading: #f0f6fc;
+      --accent: #58a6ff;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+    h1, h2, h3 { color: var(--heading); }
+    h1 { border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    h2 { margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+    .mermaid-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.6rem 1rem;
+      text-align: left;
+    }
+    th { background: #21262d; color: var(--heading); }
+    code {
+      background: #21262d;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9em;
+      color: #79c0ff;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: #1f6feb33;
+      color: var(--accent);
+      border: 1px solid #1f6feb66;
+    }
+  </style>
+</head>
+<body>
+  <h1>UniSubmit AI — Architecture & RAG Flow</h1>
+  <p><span class="badge">Live Diagram</span> Interactive visualization of Qdrant, BGE-M3, and Qwen.</p>
+
+  <h2>Architecture Overview</h2>
+  <div class="mermaid-card">
+    <div class="mermaid">
+graph TD
+    subgraph CoreApp ["Core Web App (Port 8000)"]
+        Admin["Admin uploads Guideline PDF"]
+        Ext["Text Extraction (PyMuPDF)"]
+        SQLite[("SQLite DB (Rules Profile)")]
+        Student["Student uploads Paper PDF"]
+        Report["Validation Report"]
+    end
+
+    subgraph AIService ["AI Service (Port 8001)"]
+        subgraph Pipe1 ["Pipeline 1: Rule Extraction"]
+            QwenRules["Qwen LLM (via Ollama)"]
+        end
+
+        subgraph Pipe2 ["Pipeline 2: Vector Indexing"]
+            BGE["BGE-M3 Embedding Model"]
+            Qdrant[("Qdrant Vector DB (Isolated Collection)")]
+        end
+
+        subgraph StudentRAG ["Student RAG Validation"]
+            QdrantSearch["Vector Search (Cosine Similarity)"]
+            QwenVal["Qwen LLM (Semantic Evaluation)"]
+        end
+    end
+
+    %% Pipeline 1: Rule Extraction
+    Admin -->|"1. Upload PDF"| Ext
+    Ext -->|"2. Guideline Text"| QwenRules
+    QwenRules -->|"3. Structured Rules JSON"| SQLite
+
+    %% Pipeline 2: Vector Indexing
+    Ext -->|"2. Guideline Text Chunks"| BGE
+    BGE -->|"3. 1024-dim Vectors"| Qdrant
+
+    %% Student Validation
+    Student -->|"Submit Paper"| QdrantSearch
+    Qdrant -.->|"Retrieve Top Chunks"| QdrantSearch
+    QdrantSearch -->|"Paper Text + Chunks"| QwenVal
+    QwenVal -->|"Semantic Findings"| Report
+    SQLite -.->|"Deterministic Rules"| Report
+    </div>
+  </div>
+
+  <h2>Components Breakdown</h2>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Role</th><th>Technology</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Embedding Model</strong></td><td>Converts text → 1024-dimension dense vectors</td><td><code>BAAI/bge-m3</code> (FlagEmbedding)</td></tr>
+      <tr><td><strong>Vector Database</strong></td><td>Stores & searches vectors by cosine similarity</td><td>Qdrant (port 6333)</td></tr>
+      <tr><td><strong>LLM</strong></td><td>Extracts rules & semantically evaluates papers</td><td>Qwen 3.5 via Ollama</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
