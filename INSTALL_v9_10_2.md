@@ -32,7 +32,7 @@ cd ai_service
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 Copy-Item .env.example .env
-ollama pull qwen3.5:35b
+ollama pull qwen3:32b
 ```
 
 If your existing Qdrant container is present, run `docker start unisubmit-qdrant`. Otherwise create it once:

@@ -8,5 +8,5 @@ services:
       - ./unisubmit.db:/app/unisubmit.db
     environment:
       - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=qwen3.5:35b
+      - OLLAMA_MODEL=qwen3:32b
   

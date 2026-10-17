@@ -61,6 +61,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
+templates.env.globals["default_llm_model"] = settings.ollama_model
 
 worker_task = None
 

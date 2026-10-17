@@ -1,8 +1,8 @@
-import os
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from .config import settings
 from .db import Base
 
 class Faculty(Base):
@@ -168,7 +168,7 @@ class AIProfile(Base):
     program_id: Mapped[int]=mapped_column(ForeignKey('programs.id'))
     submission_type: Mapped[str]=mapped_column(String(80))
     service_url: Mapped[str]=mapped_column(String(250),default='http://127.0.0.1:8001')
-    base_model: Mapped[str]=mapped_column(String(120),default=lambda: os.getenv('OLLAMA_MODEL', 'qwen3.5:9b'))
+    base_model: Mapped[str]=mapped_column(String(120),default=lambda: settings.ollama_model)
     adapter_name: Mapped[str]=mapped_column(String(160),default='')
     adapter_version: Mapped[str]=mapped_column(String(60),default='')
     embedding_model: Mapped[str]=mapped_column(String(120),default='BAAI/bge-m3')

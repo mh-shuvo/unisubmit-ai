@@ -27,7 +27,7 @@ logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="UniSubmit AI Service", version=APP_VERSION)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-DEFAULT_LLM_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:35b")
+DEFAULT_LLM_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:32b")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 

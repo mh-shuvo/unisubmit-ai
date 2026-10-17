@@ -92,9 +92,9 @@ Same-type failures across multiple pages are consolidated while preserving affec
 
 ## v9.2 model configuration
 
-The default local LLM is now `qwen3.5:35b`. Run `ollama pull qwen3.5:35b` before starting the AI service. The AI service reads `ai_service/.env`; copy `ai_service/.env.example` to `ai_service/.env` and edit it whenever you want to switch models without changing code.
+The default local LLM is now `qwen3:32b`. Run `ollama pull qwen3:32b` before starting the AI service. The AI service reads `ai_service/.env`; copy `ai_service/.env.example` to `ai_service/.env` and edit it whenever you want to switch models without changing code.
 
-If upgrading with an existing SQLite database, previously saved AI profiles can still point to `qwen3:14b`. Update the Base model field in **Admin → AI Management** to `qwen3.5:35b` for those profiles.
+If upgrading with an existing SQLite database, previously saved AI profiles can still point to `qwen3:14b`. Update the Base model field in **Admin → AI Management** to `qwen3:32b` for those profiles.
 
 ## v9.3 parser hardening
 The guideline parser now uses strict structured extraction with one JSON-repair retry, a stronger standard-text fallback parser, cover-page pattern inference, coverage auditing, and a program-guideline consistency gate. Re-parse each active guideline after upgrading.

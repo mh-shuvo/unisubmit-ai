@@ -4,7 +4,7 @@ This service is intentionally separate from the UniSubmit Core application.
 
 ## Default stack
 
-- LLM: `qwen3.5:35b` via Ollama
+- LLM: `qwen3:32b` via Ollama
 - Embeddings: `BAAI/bge-m3`
 - Vector database: Qdrant
 - PDF parsing/layout: PyMuPDF
@@ -26,7 +26,7 @@ copy .env.example .env
 Install the model once:
 
 ```powershell
-ollama pull qwen3.5:35b
+ollama pull qwen3:32b
 ```
 
 Start Qdrant, for example:
@@ -51,7 +51,7 @@ Health check:
 
 `http://127.0.0.1:8001/health`
 
-The health response exposes the configured default model. It should show `qwen3.5:35b` when `.env` is loaded correctly.
+The health response exposes the configured default model. It should show `qwen3:32b` when `.env` is loaded correctly.
 
 ## Guideline-first validation
 
