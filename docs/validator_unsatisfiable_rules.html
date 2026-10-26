@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three Unsatisfiable Rules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --paper:   #fafafb;
+  --surface: #ffffff;
+  --sunken:  #f2f4f7;
+  --ink:     #15191f;
+  --muted:   #5a6472;
+  --border:  #dde2e9;
+  --accent:  #1f6f8b;
+  --fail:    #b03a2b;
+  --ok:      #2d6a4e;
+  --warn:    #8a6420;
+  --shadow:  0 1px 2px rgba(21, 25, 31, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #11141a;
+    --surface: #171c24;
+    --sunken:  #1d232c;
+    --ink:     #e5e9ef;
+    --muted:   #98a2b0;
+    --border:  #272e39;
+    --accent:  #5bb6ce;
+    --fail:    #e07b6c;
+    --ok:      #6dbe94;
+    --warn:    #d4a24c;
+    --shadow:  0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+:root[data-theme="dark"] {
+  --paper:   #11141a;
+  --surface: #171c24;
+  --sunken:  #1d232c;
+  --ink:     #e5e9ef;
+  --muted:   #98a2b0;
+  --border:  #272e39;
+  --accent:  #5bb6ce;
+  --fail:    #e07b6c;
+  --ok:      #6dbe94;
+  --warn:    #d4a24c;
+  --shadow:  0 1px 2px rgba(0, 0, 0, .4);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Helvetica, Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3.5rem;
+}
+
+.prose { max-width: 40rem; display: flex; flex-direction: column; gap: 1rem; }
+.prose > * { margin: 0; }
+
+h1, h2, h3 {
+  font-family: Spectral, Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  line-height: 1.2;
+  text-wrap: balance;
+  margin: 0;
+}
+h1 { font-size: 2.6rem; letter-spacing: -.015em; }
+h2 { font-size: 1.75rem; letter-spacing: -.01em; }
+h3 { font-size: 1.15rem; }
+
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .75rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.lede { font-size: 1.2rem; color: var(--muted); max-width: 38rem; }
+
+header.page { display: flex; flex-direction: column; gap: .9rem; }
+header.page .meta {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .8rem;
+  color: var(--muted);
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- sections ---- */
+section.bug {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-top: 2.5rem;
+  border-top: 3px solid var(--ink);
+}
+section.plain {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid var(--border);
+}
+.stack { display: flex; flex-direction: column; gap: .85rem; }
+.stack > * { margin: 0; }
+
+/* ---- the causal chain ---- */
+.chain-summary {
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1.1rem 1.25rem;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .84rem;
+  line-height: 1.9;
+}
+.chain-summary .arrow { color: var(--accent); padding: 0 .15rem; }
+.chain-summary .end { color: var(--warn); font-weight: 600; }
+.chain-summary .end-fail { color: var(--fail); font-weight: 600; }
+
+ol.chain {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 2.75rem;
+  counter-reset: step;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+ol.chain::before {
+  content: "";
+  position: absolute;
+  left: .78rem;
+  top: .7rem;
+  bottom: .7rem;
+  width: 1px;
+  background: var(--border);
+}
+ol.chain > li {
+  counter-increment: step;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+ol.chain > li > * { margin: 0; }
+/* Prose keeps a readable measure; code and tables may use the full column. */
+ol.chain > li > p { max-width: 40rem; }
+ol.chain > li::before {
+  content: counter(step);
+  position: absolute;
+  left: -2.75rem;
+  top: -.1rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .78rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+ol.chain > li.terminal::before {
+  border-color: var(--warn);
+  color: var(--paper);
+  background: var(--warn);
+}
+ol.chain > li.terminal-fail::before {
+  border-color: var(--fail);
+  color: var(--paper);
+  background: var(--fail);
+}
+.step-head {
+  font-family: Spectral, Georgia, serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.measured {
+  display: inline-block;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .68rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ok);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: .05rem .4rem;
+  vertical-align: .12em;
+  margin-left: .35rem;
+  white-space: nowrap;
+}
+.wide { max-width: none; }
+
+/* ---- tables ---- */
+.scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 3px;
+          background: var(--surface); box-shadow: var(--shadow); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td {
+  text-align: left;
+  padding: .6rem .85rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+thead th {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .72rem;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--sunken);
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+         font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.tag {
+  display: inline-block;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  padding: .12rem .45rem;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.tag.fail { color: var(--fail); }
+.tag.ok   { color: var(--ok); }
+.tag.warn { color: var(--warn); }
+
+/* ---- code ---- */
+pre {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .82rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+pre .c  { color: var(--muted); }
+pre .hl { color: var(--fail); font-weight: 600; }
+pre .gd { color: var(--ok); font-weight: 600; }
+code {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .87em;
+  background: var(--sunken);
+  padding: .1rem .3rem;
+  border-radius: 2px;
+}
+figcaption { font-size: .82rem; color: var(--muted); margin-top: .5rem;
+             max-width: 40rem; }
+figure { margin: 0; }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  padding: .1rem 0 .1rem 1.1rem;
+  color: var(--muted);
+  max-width: 40rem;
+}
+.callout strong { color: var(--ink); }
+
+.fixbox {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: 1rem 1.2rem;
+  max-width: 40rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+.fixbox > * { margin: 0; }
+.fixbox .label, .verdict .label {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .7rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  display: block;
+}
+.fixbox .label { color: var(--ok); }
+
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fail);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: 1rem 1.2rem;
+  max-width: 40rem;
+}
+.verdict p { margin: 0; }
+.verdict .label { color: var(--fail); margin-bottom: .3rem; }
+
+svg { display: block; max-width: 100%; height: auto; }
+.diagram {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+.svg-ink    { fill: var(--ink); }
+.svg-muted  { fill: var(--muted); }
+.svg-accent { fill: var(--accent); }
+.svg-fail   { fill: var(--fail); }
+.svg-ok     { fill: var(--ok); }
+.svg-warn   { fill: var(--warn); }
+.s-ink    { stroke: var(--ink); }
+.s-muted  { stroke: var(--muted); }
+.s-accent { stroke: var(--accent); }
+.s-fail   { stroke: var(--fail); }
+.s-border { stroke: var(--border); }
+.mono-s  { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+           font-size: 11px; }
+.mono-xs { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+           font-size: 9.5px; letter-spacing: .05em; }
+
+ul.tight { margin: 0; padding-left: 1.1rem; display: flex;
+           flex-direction: column; gap: .4rem; }
+ul.tight li { padding-left: .2rem; }
+
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.45rem; }
+  .wrap { padding-top: 2.5rem; gap: 2.5rem; }
+  ol.chain { padding-left: 2.25rem; }
+  ol.chain > li::before { left: -2.25rem; }
+  ol.chain::before { left: .6rem; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <p class="eyebrow">UniSubmit validation engine</p>
+  <h1>Three rules no thesis can satisfy</h1>
+  <p class="lede">All three bugs sit in the measurement layer, not in any
+  student's document. Each one makes a guideline rule impossible to pass — not
+  hard, not usually-failing, but impossible. Each is traced below as a chain of
+  steps, every step caused by the one above it.</p>
+  <p class="meta">Found while rebuilding submission #3 to full compliance &middot;
+  verified against <code>app/pdf_utils.py</code> and
+  <code>app/format_validation.py</code> at commit <code>b38c6d1</code></p>
+</header>
+
+<section class="plain" style="border-top:none; padding-top:0">
+  <h2>The short version</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Bug</th><th>Where</th><th>What it does today</th>
+          <th>Cost if left alone</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Spacing ceiling</strong></td>
+          <td class="num">pdf_utils.py<br><span style="color:var(--muted)">estimated_line_spacing</span></td>
+          <td>Double spacing can never be measured, so the rule emits a
+          permanent <span class="tag warn">WARNING</span></td>
+          <td>Cosmetic. Compliance rate is capped near 98%; submissions still
+          pass.</td>
+        </tr>
+        <tr>
+          <td><strong>Shared heading set</strong></td>
+          <td class="num">format_validation.py<br><span style="color:var(--muted)">_heading_candidates</span></td>
+          <td>Chapter and section rules read the <em>same</em> lines and demand
+          two different sizes of them</td>
+          <td><strong>Serious.</strong> Any thesis that numbers its chapters —
+          which the guideline requires — takes two mandatory
+          <span class="tag fail">FAIL</span> rows that the student cannot
+          clear.</td>
+        </tr>
+        <tr>
+          <td><strong>Weight discarded</strong></td>
+          <td class="num">pdf_utils.py<br><span style="color:var(--muted)">_norm_font</span></td>
+          <td>Font normalisation deletes "Bold" from the font name, which is the
+          only place <code>heading_bold_required</code> looks</td>
+          <td><strong>Latent, and it bites the moment you fix bug 2.</strong>
+          Today it is masked, because bug 2 leaves the rule with no headings to
+          inspect.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="callout">Why this mattered for the thesis: bug&nbsp;2 is the reason
+  the new submission has chapter headings reading <code>INTRODUCTION</code>
+  rather than <code>CHAPTER 1: INTRODUCTION</code>, and unnumbered section
+  headings. That was the only way to reach zero failures. Fixing the engine would
+  let the chapter numbering come back.</p>
+</section>
+
+<!-- ============================ BUG 1 ============================ -->
+<section class="bug">
+  <div class="stack">
+    <p class="eyebrow">Bug 1 &middot; pdf_utils.py &rarr; estimated_line_spacing</p>
+    <h2>Double spacing is invisible to the measurement</h2>
+  </div>
+
+  <div class="chain-summary">
+    12 pt font
+    <span class="arrow">&rarr;</span> double spacing = 24 pt gap
+    <span class="arrow">&rarr;</span> ratio 2.0
+    <span class="arrow">&rarr;</span> above MuPDF's ~1.5 em grouping ceiling
+    <span class="arrow">&rarr;</span> every line becomes its own block
+    <span class="arrow">&rarr;</span> one line per block means no pairs
+    <span class="arrow">&rarr;</span> nothing measured
+    <span class="arrow">&rarr;</span> <code>None</code>
+    <span class="arrow">&rarr;</span> <span class="end">WARNING</span>
+  </div>
+
+  <ol class="chain">
+
+    <li>
+      <p class="step-head">The font size is 12 pt. It is not doubled.</p>
+      <p>Worth stating first, because it is the easiest thing to mix up. The
+      guideline sets body text at 12&nbsp;pt and that never changes. What gets
+      doubled is the <em>spacing between</em> lines, not the type.</p>
+    </li>
+
+    <li>
+      <p class="step-head">Double spacing means a 24 pt baseline gap.</p>
+      <p>"Double" is a multiple of the font size, so the distance from one line's
+      baseline to the next is 2.0&nbsp;&times;&nbsp;12&nbsp;pt =
+      <strong>24&nbsp;pt</strong>.</p>
+    </li>
+
+    <li>
+      <p class="step-head">The rule checks a ratio, not a distance.</p>
+      <p>It divides the gap by the font size, so a correct document reports
+      <code>24 / 12 = 2.0</code>. The checker tolerates
+      <code>&plusmn;&nbsp;0.28</code>, which makes
+      <strong>1.72 the lowest ratio that can pass</strong> — at 12&nbsp;pt that
+      is a gap of 20.64&nbsp;pt.</p>
+      <div class="scroll" style="max-width:40rem">
+        <table>
+          <thead>
+            <tr><th>Number</th><th>What it is</th><th>Where it comes from</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="num">2.0</td>
+              <td>the requirement</td>
+              <td>Guideline &sect;3, <em>"Double-spacing throughout main body
+              text"</em> &rarr; <code>line_spacing = 2.0</code></td>
+            </tr>
+            <tr>
+              <td class="num">&plusmn; 0.28</td>
+              <td>the tolerance</td>
+              <td>Hard-coded: <code>abs(det - exp) &gt; 0.28</code></td>
+            </tr>
+            <tr>
+              <td class="num">1.72</td>
+              <td>lowest ratio that passes</td>
+              <td>2.0 &minus; 0.28</td>
+            </tr>
+            <tr>
+              <td class="num">~1.5 em</td>
+              <td><strong>not a rule at all</strong> — MuPDF's grouping ceiling
+              (step 4)</td>
+              <td>Behaviour of the PDF reader. Not specified anywhere;
+              <strong>measured</strong>, see step 4</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+
+    <li>
+      <p class="step-head">MuPDF keeps two lines in one block only up to about
+      1.5 em.<span class="measured">measured</span></p>
+      <p>This is a ceiling, not a target: gaps <em>below</em> it group as well.
+      Everything from 1.19&nbsp;em upward stays together until the ceiling is
+      crossed, then MuPDF decides the lines are separate paragraphs. Sweeping
+      line-height in 0.02 steps across nine font sizes puts the ceiling between
+      <strong>1.41 and 1.63&nbsp;&times; the font size</strong>:</p>
+      <figure class="wide">
+<pre> css pt  reported           last grouped            first split  threshold / size
+----------------------------------------------------------------------------------
+      8      7.99      lh 1.4 = 11.25 pt      lh 1.5 = 12.00 pt     1.408 - 1.502
+      9      9.00      lh 1.5 = 13.50 pt     lh 1.58 = 14.25 pt     1.500 - 1.583
+     10     10.00     lh 1.42 = 14.25 pt      lh 1.5 = 15.00 pt     1.425 - 1.500
+     11     10.99     lh 1.44 = 15.75 pt      lh 1.5 = 16.50 pt     1.433 - 1.501
+<span class="hl">     12     12.00     lh 1.56 = 18.75 pt     lh 1.64 = 19.50 pt     1.562 - 1.625</span>
+     13     13.00     lh 1.44 = 18.75 pt      lh 1.5 = 19.50 pt     1.442 - 1.500
+     14     13.99     lh 1.46 = 20.25 pt      lh 1.5 = 21.00 pt     1.447 - 1.501
+     16     16.00     lh 1.46 = 23.25 pt      lh 1.5 = 24.00 pt     1.453 - 1.500
+     18     18.00     lh 1.54 = 27.75 pt      lh 1.6 = 28.50 pt     1.542 - 1.583</pre>
+        <figcaption>It scales with the font, which is why it is quoted in em
+        rather than points. The exact crossing shifts a little with column
+        layout, so "about 1.5&nbsp;em" is the honest phrasing — not exactly
+        1.5. From <code>probe_threshold.py</code>.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">1.72 is above the ceiling, so a passing document is
+      always already split.</p>
+      <p>Here the two numbers collide. To be <em>sampled</em> the gap must stay
+      under about 1.5&nbsp;em; to <em>pass</em> it must reach 1.72&nbsp;em. At
+      12&nbsp;pt, grouping stops at an 18.75&nbsp;pt gap while the passing range
+      does not begin until 20.64&nbsp;pt. The same sweep checked all 31 steps for
+      any row that is both grouped and inside the passing range:</p>
+      <figure class="wide">
+<pre> css lh  gap pt  gap/size  grouped  in PASS range?
+--------------------------------------------------------
+   1.52   18.00     1.500     True
+   1.54   18.00     1.500     True
+<span class="hl">   1.56   18.75     1.562     True            &lt;- last grouped gap</span>
+   1.58   18.75     1.562    False
+    1.6   18.75     1.562    False
+   1.64   19.50     1.625    False
+    1.7   20.25     1.688    False
+<span class="hl">   1.76   21.00     1.750    False  YES       &lt;- first gap in range, already split</span>
+   1.78   21.00     1.750    False  YES
+    1.8   21.00     1.750    False  YES
+
+rows that are BOTH grouped AND in the PASS range: NONE</pre>
+        <figcaption>The two sets never meet. The 0.16&nbsp;em between
+        1.562 and 1.72 is the whole bug.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">So every line becomes a block of its
+      own.<span class="measured">measured</span></p>
+      <p>At <code>line-height: 2</code> a four-line paragraph does not arrive as
+      one block of four lines. It arrives as four blocks of one line each:</p>
+      <figure class="wide">
+<pre>lh 1.5   gap 18.00 pt   blocks = 1   lines per block = [4]
+<span class="hl">lh 2.0   gap 24.00 pt   blocks = 4   lines per block = [1, 1, 1, 1]</span></pre>
+      </figure>
+      <figure class="diagram">
+        <svg viewBox="0 0 640 230" role="img"
+             aria-label="At a 1.5 em gap the two lines stay in one block and the spacing measures 1.5. At a 2.0 em gap the block splits in two and the spacing measures None.">
+          <text x="12" y="20" class="mono-xs svg-accent">GAP 1.5 EM &#183; 18 PT AT 12 PT</text>
+          <rect x="12" y="38" width="250" height="86" rx="2" fill="none"
+                class="s-accent" stroke-width="1.5"/>
+          <text x="22" y="54" class="mono-xs svg-accent">ONE BLOCK</text>
+          <rect x="22" y="66" width="230" height="7" rx="1" class="svg-ink"/>
+          <rect x="22" y="102" width="196" height="7" rx="1" class="svg-ink"/>
+          <line x1="284" y1="69" x2="284" y2="105" class="s-muted" stroke-width="1"/>
+          <line x1="280" y1="69" x2="288" y2="69" class="s-muted" stroke-width="1"/>
+          <line x1="280" y1="105" x2="288" y2="105" class="s-muted" stroke-width="1"/>
+          <text x="12" y="150" class="mono-s svg-ink">pair exists, is sampled</text>
+          <text x="12" y="170" class="mono-s svg-ok">measured 1.5</text>
+          <text x="12" y="190" class="mono-s svg-fail">needs 1.72 &rarr; FAIL</text>
+
+          <line x1="320" y1="10" x2="320" y2="210" class="s-border"
+                stroke-width="1" stroke-dasharray="3 4"/>
+
+          <text x="372" y="20" class="mono-xs svg-accent">GAP 2.0 EM &#183; 24 PT AT 12 PT</text>
+          <rect x="372" y="38" width="250" height="36" rx="2" fill="none"
+                class="s-accent" stroke-width="1.5"/>
+          <text x="382" y="54" class="mono-xs svg-accent">BLOCK A</text>
+          <rect x="382" y="60" width="230" height="7" rx="1" class="svg-ink"/>
+          <rect x="372" y="88" width="250" height="36" rx="2" fill="none"
+                class="s-accent" stroke-width="1.5"/>
+          <text x="382" y="104" class="mono-xs svg-accent">BLOCK B</text>
+          <rect x="382" y="110" width="196" height="7" rx="1" class="svg-ink"/>
+          <text x="372" y="150" class="mono-s svg-ink">no pair exists</text>
+          <text x="372" y="170" class="mono-s svg-muted">measured None</text>
+          <text x="372" y="190" class="mono-s svg-warn">unmeasurable &rarr; WARNING</text>
+        </svg>
+        <figcaption>The whole bug in one picture. The split on the right is
+        MuPDF's behaviour, not a requirement — real double spacing lands there,
+        where there is nothing left to measure.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">One line per block means no pairs, because the code
+      never compares across a block boundary.</p>
+      <p>This is the step that is easiest to state wrongly. The code
+      <em>does</em> handle many blocks — the outer loop visits every one. What it
+      never does is pair the last line of block&nbsp;A with the first line of
+      block&nbsp;B, because <code>block_lines</code> is emptied at the top of each
+      block:</p>
+      <figure class="wide">
+<pre><span class="c"># app/pdf_utils.py</span>
+for block in d.get('blocks', []):      <span class="c"># visits ALL blocks — not the problem</span>
+    block_lines = []                   <span class="hl"># reset per block — this is the problem</span>
+    for line in block.get('lines', []):
+        ...
+        block_lines.append(lines_meta[-1])
+
+    <span class="c"># pairs only WITHIN this one block</span>
+    for a, b in zip(block_lines, block_lines[1:]):
+        if a['font_size'] and b['font_size']:
+            baseline_gap = b['bbox'][1] - a['bbox'][1]
+            fs = (a['font_size'] + b['font_size']) / 2
+            if 0.8 * fs &lt;= baseline_gap &lt;= 3.0 * fs:   <span class="c"># 2.0 would be accepted here</span>
+                line_spacings.append(baseline_gap / fs)</pre>
+        <figcaption>Note the sample window on the second-to-last line already
+        accepts 2.0. The requirement is not rejected — it is never reached,
+        because <code>zip([x], [])</code> is empty when a block holds one
+        line.</figcaption>
+      </figure>
+    </li>
+
+    <li class="terminal">
+      <p class="step-head">Nothing is measured, so the rule warns instead of
+      failing.</p>
+      <p><code>line_spacings</code> stays empty, <code>estimated_line_spacing</code>
+      comes back <code>None</code> for every page, and the checker takes its
+      "could not estimate" path. The result is <strong>not a wrong number but no
+      number at all</strong> — which is why a correctly formatted thesis gets a
+      warning rather than a failure.</p>
+      <figure class="wide">
+<pre>for pg in info.get('pages', []):
+    det = pg.get('estimated_line_spacing')
+    if det is None:        low.append(...)        <span class="hl"># every page lands here</span>
+    elif abs(det - exp) &gt; 0.28: occ.append(...)
+
+if occ:   FAIL
+elif low: <span class="hl">WARNING  &lt;- "Line spacing could not be measured reliably"</span></pre>
+      </figure>
+    </li>
+  </ol>
+
+  <div class="verdict" style="border-left-color: var(--warn)">
+    <span class="label" style="color: var(--warn)">Net effect</span>
+    <p>The rule has no PASS path at all. A correctly double-spaced thesis reports
+    <code>None</code> on every page and gets the warning; a thesis tight enough to
+    be measured reports 1.5 or less and gets a hard failure. This is why
+    version&nbsp;6 sits at 97.9% rather than 100%.</p>
+  </div>
+
+  <div class="fixbox">
+    <span class="label">The fix</span>
+    <p>Break the dependency on MuPDF's paragraph grouping, which step&nbsp;7 shows
+    is the only thing standing in the way. Collect the page's lines, sort them by
+    vertical position, and pair neighbours that overlap horizontally — then apply
+    the existing <code>0.8 &ndash; 3.0</code> window, which already accepts 2.0.
+    The block boundary carries no information this check needs.</p>
+  </div>
+
+  <p class="callout"><strong>One related detail worth fixing at the same time.</strong>
+  <code>font_size</code> for a line is the plain mean of its span sizes, not a
+  length-weighted one. A line mixing a 12&nbsp;pt run with one short 6&nbsp;pt run
+  reports 9&nbsp;pt, which inflates the computed ratio — so the measurement is
+  gameable toward a false PASS. The replacement should use the dominant span size
+  rather than the mean.</p>
+</section>
+
+<!-- ============================ BUG 2 ============================ -->
+<section class="bug">
+  <div class="stack">
+    <p class="eyebrow">Bug 2 &middot; format_validation.py &rarr; _heading_candidates</p>
+    <h2>Chapter and section rules fight over the same lines</h2>
+  </div>
+
+  <div class="chain-summary">
+    two rules, two targets
+    <span class="arrow">&rarr;</span> both hit one branch that ignores the target
+    <span class="arrow">&rarr;</span> both get an identical line list
+    <span class="arrow">&rarr;</span> one demands 14 pt, the other 12 pt
+    <span class="arrow">&rarr;</span> the windows do not overlap
+    <span class="arrow">&rarr;</span> <span class="end-fail">FAIL whatever the student does</span>
+  </div>
+
+  <ol class="chain">
+
+    <li>
+      <p class="step-head">The guideline sets two heading levels, so the parser
+      stores two rules.</p>
+      <p>Chapter titles at 14&nbsp;pt, secondary headings at 12&nbsp;pt. Each
+      becomes its own rule with its own <code>target</code>, which looks exactly
+      right:</p>
+      <figure class="wide">
+<pre>{'type': 'heading_font_size_pt', 'target': 'Chapter Heading', 'value': 14}   <span class="c"># rule 25</span>
+{'type': 'heading_font_size_pt', 'target': 'Section Heading', 'value': 12}   <span class="c"># rule 29</span></pre>
+        <figcaption>From <code>template_versions.format_profile_json</code>,
+        guideline version 2.1.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">But the resolver throws the target away.</p>
+      <p>When the target is one of three recognised phrases, the branch that runs
+      never consults it again — it falls back to a single shared pattern:</p>
+      <figure class="wide">
+<pre><span class="c"># app/format_validation.py — _heading_candidates()</span>
+for name in names:
+    low = name.lower()
+    found = []
+    for pg in info.get('pages', []):
+        for ln in pg.get('lines', []):
+            txt = (ln.get('text') or '').strip()
+<span class="hl">            if low in {'chapter heading', 'section heading', 'heading'}:
+                if re.match(r'^(chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)', txt, re.I):
+                    found.append((pg, ln))          # 'low' is never used again</span>
+            elif low in txt.lower():
+                found.append((pg, ln))</pre>
+        <figcaption><code>'chapter heading'</code> and
+        <code>'section heading'</code> both enter the highlighted branch, so the
+        distinction between them is lost at this point.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">The same pattern also sweeps in the table of
+      contents.<span class="measured">measured</span></p>
+      <p>A second consequence of discarding the target. Unlike
+      <code>_find_actual_heading</code>, which deliberately skips contents pages,
+      <code>_heading_candidates</code> has no such guard — so every contents entry
+      beginning <code>Chapter&nbsp;N</code> or <code>1.1</code> is collected as a
+      heading as well. Version 5 of the thesis shows it plainly; the trailing
+      digits are page numbers from the contents listing, not part of any
+      heading:</p>
+      <figure class="wide">
+<pre>Chapter Heading: Heading Alignment          Affected pages: 5, 6, 7, 8, 9, 10
+
+Page   Detected      Example
+<span class="hl">p.5    left/right    CHAPTER 1: INTRODUCTION1        &lt;- contents entry, page 1</span>
+<span class="hl">p.5    left/right    1.1 Background1                 &lt;- contents entry, page 1</span>
+p.5    left/right    1.2 Problem Statement1
+p.6    left/right    CHAPTER 2: LITERATURE REVIEW4
+p.6    left/right    2.1 Evidence Types and Evaluation4</pre>
+        <figcaption>From the version 5 report. Contents entries are left-aligned
+        by nature, so the "chapter headings must be centred" rule fails on them
+        even when every real chapter heading is perfectly centred.</figcaption>
+      </figure>
+      <p><strong>But this is an aggravation, not the cause.</strong> It is natural
+      to read the bug as a clash between the 12&nbsp;pt contents entry and the
+      14&nbsp;pt heading of the same chapter. It is not — the conflict survives
+      with a single heading and no contents page at all. Two documents, both with
+      the chapter heading set to 14&nbsp;pt bold centred:</p>
+      <figure class="wide">
+<pre><span class="c">Document A: one chapter heading, NO contents page</span>
+    lines handed to BOTH heading rules: 1
+      p1   14.0 pt  'CHAPTER 1: INTRODUCTION'
+    <span class="gd">PASS</span>   Chapter Heading: heading font size     expected 14 pt   satisfied
+    <span class="hl">FAIL</span>   Section Heading: Heading Font Size Pt  expected 12      got 14 pt
+
+<span class="c">Document B: the same, with a contents page added</span>
+    lines handed to BOTH heading rules: 3
+      p1   12.0 pt  'CHAPTER 1: INTRODUCTION'      <span class="c">&lt;- contents entry</span>
+      p1   12.0 pt  '1.1 Background'               <span class="c">&lt;- contents entry</span>
+      p2   14.0 pt  'CHAPTER 1: INTRODUCTION'      <span class="c">&lt;- the real heading</span>
+    <span class="hl">FAIL</span>   Chapter Heading: Heading Font Size Pt  expected 14      got 12 pt
+    <span class="hl">FAIL</span>   Section Heading: Heading Font Size Pt  expected 12      got 14 pt</pre>
+        <figcaption>Document A has one candidate line and still fails, which rules
+        out the contents listing as the cause. Adding the contents page turns one
+        failure into two. From <code>probe_isolate.py</code>.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">So both rules receive the same
+      lines.<span class="measured">measured</span></p>
+      <p>Not similar lists — the identical list. A one-page PDF with a single
+      heading, asked for each target in turn:</p>
+      <figure class="wide">
+<pre>Chapter Heading candidates : ['CHAPTER 1: INTRODUCTION']
+Section Heading candidates : ['CHAPTER 1: INTRODUCTION']
+<span class="hl">identical sets?            : True</span></pre>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">Each rule then demands a different size of that one
+      line.</p>
+      <p>Both compare with a tolerance of 0.7, so the same line must satisfy two
+      windows at once — and they do not overlap:</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 640 170" role="img"
+             aria-label="The section heading window spans 11.3 to 12.7 points and the chapter heading window spans 13.3 to 14.7 points. The windows do not overlap, so no single value satisfies both.">
+          <line x1="60" y1="118" x2="600" y2="118" class="s-muted" stroke-width="1"/>
+          <g class="mono-xs svg-muted">
+            <text x="56" y="136">11</text>
+            <text x="146" y="136">12</text>
+            <text x="236" y="136">13</text>
+            <text x="326" y="136">14</text>
+            <text x="416" y="136">15</text>
+          </g>
+          <g class="s-muted" stroke-width="1">
+            <line x1="60" y1="118" x2="60" y2="124"/>
+            <line x1="150" y1="118" x2="150" y2="124"/>
+            <line x1="240" y1="118" x2="240" y2="124"/>
+            <line x1="330" y1="118" x2="330" y2="124"/>
+            <line x1="420" y1="118" x2="420" y2="124"/>
+          </g>
+          <text x="470" y="136" class="mono-xs svg-muted">POINTS</text>
+
+          <rect x="87" y="80" width="126" height="22" rx="2" class="svg-accent"
+                opacity=".22"/>
+          <rect x="87" y="80" width="126" height="22" rx="2" fill="none"
+                class="s-accent" stroke-width="1.5"/>
+          <text x="87" y="72" class="mono-xs svg-accent">SECTION HEADING</text>
+          <text x="150" y="95" class="mono-xs svg-ink" text-anchor="middle">11.3 &ndash; 12.7</text>
+
+          <rect x="267" y="38" width="126" height="22" rx="2" class="svg-accent"
+                opacity=".22"/>
+          <rect x="267" y="38" width="126" height="22" rx="2" fill="none"
+                class="s-accent" stroke-width="1.5"/>
+          <text x="267" y="30" class="mono-xs svg-accent">CHAPTER HEADING</text>
+          <text x="330" y="53" class="mono-xs svg-ink" text-anchor="middle">13.3 &ndash; 14.7</text>
+
+          <rect x="213" y="38" width="54" height="80" class="svg-fail" opacity=".12"/>
+          <line x1="213" y1="38" x2="213" y2="118" class="s-fail" stroke-width="1"
+                stroke-dasharray="3 3"/>
+          <line x1="267" y1="38" x2="267" y2="118" class="s-fail" stroke-width="1"
+                stroke-dasharray="3 3"/>
+          <text x="438" y="76" class="mono-s svg-fail">no overlap &rarr;</text>
+          <text x="438" y="94" class="mono-s svg-fail">empty intersection</text>
+        </svg>
+        <figcaption>One line, two mandatory windows, nothing in common.</figcaption>
+      </figure>
+    </li>
+
+    <li class="terminal-fail">
+      <p class="step-head">Whatever size the student picks, at least one rule
+      fails.<span class="measured">measured</span></p>
+      <p>The same heading rendered at three sizes, checked against only these two
+      rules:</p>
+      <figure class="wide">
+<pre>heading at 12 pt
+  <span class="hl">FAIL</span>  Chapter Heading: Heading Font Size Pt   expected 14   got 12 pt
+  <span class="gd">PASS</span>  Section Heading: heading font size      expected 12   satisfied
+
+heading at 13 pt
+  <span class="hl">FAIL</span>  Chapter Heading: Heading Font Size Pt   expected 14   got 13 pt
+  <span class="hl">FAIL</span>  Section Heading: Heading Font Size Pt   expected 12   got 13 pt
+
+heading at 14 pt
+  <span class="gd">PASS</span>  Chapter Heading: heading font size      expected 14   satisfied
+  <span class="hl">FAIL</span>  Section Heading: Heading Font Size Pt   expected 12   got 14 pt</pre>
+        <figcaption>12&nbsp;pt fails one, 14&nbsp;pt fails the other, 13&nbsp;pt
+        fails both. There is no third option. From
+        <code>repro_headings.py</code>.</figcaption>
+      </figure>
+    </li>
+  </ol>
+
+  <div class="verdict">
+    <span class="label">Net effect</span>
+    <p>Any document containing a line that starts with <code>Chapter&nbsp;1</code>
+    or <code>1.1&nbsp;</code> earns at least one mandatory failure, and no edit the
+    student can make will clear it. The only clean document is one whose headings
+    the resolver cannot see at all — which is exactly what the rebuilt thesis
+    does, at the price of 8 rules reading <span class="tag">NOT VERIFIED</span>
+    and the chapter numbering being dropped.</p>
+  </div>
+
+  <div class="fixbox">
+    <span class="label">The fix</span>
+    <p>Give each level its own pattern instead of sharing one, so step&nbsp;2
+    stops discarding the target:</p>
+    <ul class="tight">
+      <li><strong>Chapter Heading</strong> &rarr; lines matching
+      <code>^chapter\s+\w+</code>, or the chapter-title line that follows one.</li>
+      <li><strong>Section Heading</strong> &rarr; lines matching
+      <code>^\d+\.\d+\s</code> — two numeric parts, not one.</li>
+      <li><strong>Third Level Heading</strong> &rarr; lines matching
+      <code>^\d+\.\d+\.\d+\s</code>. Today this target matches nothing at all,
+      because it falls through to the substring branch and no line literally
+      contains the words "third level heading" — which is why its four rules read
+      NOT VERIFIED.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================ BUG 3 ============================ -->
+<section class="bug">
+  <div class="stack">
+    <p class="eyebrow">Bug 3 &middot; pdf_utils.py &rarr; _norm_font</p>
+    <h2>A bold heading is reported as not bold</h2>
+  </div>
+
+  <div class="chain-summary">
+    heading is genuinely bold
+    <span class="arrow">&rarr;</span> font name is <code>TimesNewRomanPS-BoldMT</code>
+    <span class="arrow">&rarr;</span> normalisation rewrites it to <code>Times New Roman</code>
+    <span class="arrow">&rarr;</span> the word "bold" is gone
+    <span class="arrow">&rarr;</span> the rule searches the name for "bold"
+    <span class="arrow">&rarr;</span> <span class="end-fail">FAIL, always</span>
+  </div>
+
+  <div class="prose">
+    <p>This one is dormant in the delivered thesis, because bug&nbsp;2 leaves the
+    rule with no headings to examine at all. It matters because of the order of
+    operations: <strong>the moment you fix bug&nbsp;2, this one starts
+    failing.</strong></p>
+  </div>
+
+  <ol class="chain">
+
+    <li>
+      <p class="step-head">The heading really is bold in the
+      PDF.<span class="measured">measured</span></p>
+      <p>Chrome embeds the bold cut as its own face and sets the bold flag bit, so
+      the information is unambiguously present in the file:</p>
+      <figure class="wide">
+<pre>text   : CHAPTER 1: INTRODUCTION
+font   : TimesNewRomanPS-BoldMT
+<span class="gd">flags  : 20  (bold bit set: True)</span></pre>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">Normalisation rewrites the font name to the family.</p>
+      <p><code>_norm_font()</code> exists to make font comparison tolerant, so
+      that <code>TimesNewRomanPSMT</code> and a dozen other spellings all match the
+      guideline's "Times New Roman". It does that job correctly. The side effect is
+      that every weight and style collapses to the same string:</p>
+      <figure class="wide">
+<pre>TimesNewRomanPSMT          -> 'Times New Roman'
+<span class="hl">TimesNewRomanPS-BoldMT     -> 'Times New Roman'</span>
+TimesNewRomanPS-ItalicMT   -> 'Times New Roman'</pre>
+        <figcaption>Three different faces, one output string. The
+        <code>flags</code> field that still holds the answer is not carried into
+        the span record.</figcaption>
+      </figure>
+    </li>
+
+    <li>
+      <p class="step-head">But the rule looks for the word "bold" in that name.</p>
+      <p>The only test for weight is a substring search against the normalised
+      name — the one string from which the weight has just been removed:</p>
+      <figure class="wide">
+<pre><span class="c"># app/format_validation.py — heading_bold_required</span>
+<span class="hl">bold = any('bold' in str(sp.get('font', '')).lower()</span>
+           and abs(sp.get('bbox', (0, 0, 0, 0))[1] - bbox[1]) &lt; 3
+           for sp in pg.get('spans', []))
+if not bold:
+    occ.append(_occ(pg['page'], txt, 'Not bold', txt, bbox))</pre>
+      </figure>
+    </li>
+
+    <li class="terminal-fail">
+      <p class="step-head">So the check can never
+      succeed.<span class="measured">measured</span></p>
+      <p>Running the rule against the genuinely bold heading from step&nbsp;1:</p>
+      <figure class="wide">
+<pre>font name the checker sees : {'Times New Roman'}
+<span class="hl">FAIL  Chapter Heading: Heading Bold Required  expected=True  detected=Not bold</span></pre>
+        <figcaption>From <code>repro_bold.py</code>.</figcaption>
+      </figure>
+    </li>
+  </ol>
+
+  <div class="verdict">
+    <span class="label">Net effect, and why the order matters</span>
+    <p>Right now this rule reads <span class="tag">NOT VERIFIED</span>, hidden
+    behind bug&nbsp;2. If you fix bug&nbsp;2 on its own, the Chapter Heading rules
+    resolve to real chapter headings and three of the four start passing —
+    alignment, size and case — while <strong>this one turns into a new mandatory
+    failure</strong>. So bugs 2 and 3 should be fixed together, or the first fix
+    will look like a regression.</p>
+  </div>
+
+  <div class="fixbox">
+    <span class="label">The fix</span>
+    <p>Keep the weight when normalising. Carry the span's <code>flags</code> into
+    the span record in <code>inspect_pdf()</code> and test
+    <code>flags &amp; 16</code> for bold, or store the raw font name alongside the
+    normalised one and search that instead. Either way the family-matching
+    behaviour of <code>_norm_font()</code> stays as it is.</p>
+  </div>
+
+  <p class="callout"><strong>The same cause has an opposite effect elsewhere.</strong>
+  <code>body_regular_required</code> flags body text as non-compliant when it finds
+  "bold" or "italic" in a span's font name. Since those words never survive
+  normalisation, that rule can never fire — body text set entirely in bold italic
+  would pass it. It is not in the active profile today, but it would be wrong if
+  switched on.</p>
+</section>
+
+<!-- ============================ ASIDE ============================ -->
+<section class="plain">
+  <h2>While you are in there: three rules that always pass</h2>
+  <div class="prose">
+    <p>Not bugs in the same sense, but they report confidence the engine has not
+    earned. The checker only recognises some of the vocabulary the guideline
+    parser produces, and silently approves the rest.</p>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Rule</th><th>Stored value</th><th>What the checker tests</th>
+        <th>Result</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">heading_case<br><span style="color:var(--muted)">Chapter Heading</span></td>
+          <td class="num">UPPERCASE</td>
+          <td>only <code>'all caps'</code> or <code>'title case'</code></td>
+          <td><span class="tag ok">PASS</span> without looking</td>
+        </tr>
+        <tr>
+          <td class="num">heading_alignment<br><span style="color:var(--muted)">Section Heading</span></td>
+          <td class="num">flush left</td>
+          <td>only values starting <code>'center'</code></td>
+          <td><span class="tag ok">PASS</span> without looking</td>
+        </tr>
+        <tr>
+          <td class="num">body_alignment</td>
+          <td class="num">justified</td>
+          <td>no validator exists</td>
+          <td><span class="tag">NOT VERIFIED</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="callout">The first two are the riskier pair: a student whose chapter
+  headings are lowercase, or whose section headings are centred, is told the rule
+  is satisfied. Matching <code>'uppercase'</code> and <code>'flush left'</code> to
+  the existing branches is a few lines of work.</p>
+</section>
+
+<!-- ============================ DECISION ============================ -->
+<section class="plain">
+  <h2>What I would do</h2>
+  <div class="prose">
+    <p>Bug&nbsp;2 is the one that matters. It penalises students for following
+    the guideline — numbering chapters is required by rule D4, and doing it
+    guarantees a failure nobody can clear. Every future submission hits it.</p>
+    <p>Bug&nbsp;1 is cosmetic by comparison: submissions still pass, they just
+    carry a warning that cannot be cleared and a compliance rate that cannot
+    reach 100%. Worth fixing, but it blocks nobody.</p>
+    <p>Bug&nbsp;3 is not optional once bug&nbsp;2 is done — fix them in the same
+    change, or the chapter-heading rules will swap one failure for another.</p>
+    <p>All three are small, contained changes across two functions, and all three
+    are coverable by unit tests in
+    <code>tests/test_format_validation_rules.py</code> using the reproduction
+    cases above as fixtures.</p>
+  </div>
+</section>
+
+<section class="plain">
+  <h2>Reproducing all of this</h2>
+  <div class="prose">
+    <p>The scripts live beside the thesis build, in
+    <code>resources/sample-thesis/AI Tools for Improving Hospital Patient
+    Care/REVISED5_source/</code>. They import the live engine — no copies, no
+    stubs — so their output reflects whatever the code does today.</p>
+  </div>
+  <figure class="wide">
+<pre>cd "resources/sample-thesis/AI Tools for Improving Hospital Patient Care/REVISED5_source"
+V=/opt/homebrew/var/www/pvs/unisubmit_ai/.venv/bin/python
+
+<span class="c"># Bug 1, steps 5-8 — the spacing ceiling and the empty result</span>
+$V repro_spacing.py
+
+<span class="c"># Bug 1, step 4 — where the ~1.5 em ceiling actually sits, across font sizes</span>
+$V probe_threshold.py
+
+<span class="c"># Bug 2, steps 4 and 6 — the shared candidate list and the impossible sizes</span>
+$V repro_headings.py
+
+<span class="c"># Bug 2, step 3 — the conflict with and without a contents page</span>
+$V probe_isolate.py
+
+<span class="c"># Bug 3 — a genuinely bold heading reported as not bold</span>
+$V repro_bold.py
+
+<span class="c"># Full rule-by-rule check of any candidate PDF</span>
+$V check.py ../REVISED5_Thesis_AI_Hospital_Patient_Care.pdf</pre>
+    <figcaption>Each script renders its own PDF through headless Chrome, then
+    runs <code>inspect_pdf()</code> and
+    <code>validate_all_profile_rules()</code> against it.</figcaption>
+  </figure>
+</section>
+
+</div>
+</body>
+</html>

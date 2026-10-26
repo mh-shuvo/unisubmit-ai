@@ -9,22 +9,37 @@ storage/submissions/submission_1_v2_*.pdf:
 - section-scoped page/spacing rules were measured against the whole document
 - targets carrying a parenthetical qualifier never matched a real heading
 - '>=' was validated as '==', so a compliant larger value still failed
+
+And the three defects that made correctly formatted theses fail:
+
+- line spacing was sampled only within a MuPDF block, which splits once the gap
+  passes ~1.5 em, so double spacing could never be observed
+- the chapter and section heading rules resolved to one shared list of lines and
+  demanded two different sizes of it, which no document can satisfy
+- font-name normalisation erased the weight before the bold check read it
 """
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+import fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.format_validation import (  # noqa: E402
     _find_section,
+    _heading_candidates,
     _is_generic_target,
     _num_ok,
     _parse_num,
     _parse_num_op,
+    _span_is_bold,
     _strip_qualifier,
     validate_all_profile_rules,
 )
+from app.pdf_utils import inspect_pdf  # noqa: E402
 
 
 def _page(page, **kw):
@@ -192,6 +207,191 @@ class OperatorSemantics(unittest.TestCase):
         row = _run(_rule(type='body_font_size_pt', value='>=12'),
                    _info([_page(1, dominant_font_size=8.0)]))
         self.assertEqual(row['status'], 'FAIL')
+
+
+class HeadingLevelSeparation(unittest.TestCase):
+    """The chapter and section rules were handed one shared list of lines.
+
+    Both targets resolved through the same branch, so 'chapter headings are 14 pt'
+    and 'section headings are 12 pt' judged the same lines. No size satisfies both,
+    so every document with a recognisable heading took at least one failure.
+    """
+
+    @staticmethod
+    def _doc():
+        pg = _page(1)
+        pg['lines'] = [
+            {'text': 'CHAPTER 1: INTRODUCTION',
+             'bbox': (200.0, 70.0, 395.0, 88.0), 'font_size': 14.0},
+            {'text': '1.1 Background',
+             'bbox': (99.0, 130.0, 220.0, 144.0), 'font_size': 12.0},
+            {'text': '1.1.1 Reporting practice',
+             'bbox': (99.0, 190.0, 260.0, 204.0), 'font_size': 12.0},
+        ]
+        return _info([pg])
+
+    def test_chapter_target_matches_only_the_chapter_line(self):
+        found = _heading_candidates(self._doc(), 'Chapter Heading')
+        self.assertEqual([ln['text'] for _, ln in found], ['CHAPTER 1: INTRODUCTION'])
+
+    def test_section_target_matches_only_the_second_level_line(self):
+        found = _heading_candidates(self._doc(), 'Section Heading')
+        self.assertEqual([ln['text'] for _, ln in found], ['1.1 Background'])
+
+    def test_third_level_target_matches_only_the_third_level_line(self):
+        found = _heading_candidates(self._doc(), 'Third Level Heading')
+        self.assertEqual([ln['text'] for _, ln in found], ['1.1.1 Reporting practice'])
+
+    def test_both_size_rules_pass_on_one_compliant_document(self):
+        rows = validate_all_profile_rules({'deterministic_rules': [
+            _rule(type='heading_font_size_pt', target='Chapter Heading', value=14),
+            _rule(type='heading_font_size_pt', target='Section Heading', value=12),
+        ]}, self._doc())
+        self.assertEqual([r['status'] for r in rows], ['PASS', 'PASS'])
+
+    def test_wrong_chapter_size_still_fails(self):
+        info = self._doc()
+        info['pages'][0]['lines'][0]['font_size'] = 12.0
+        row = _run(_rule(type='heading_font_size_pt', target='Chapter Heading', value=14),
+                   info)
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_contents_entries_are_not_headings(self):
+        toc = _page(1)
+        toc['lines'] = [
+            {'text': 'TABLE OF CONTENTS',
+             'bbox': (200.0, 70.0, 395.0, 88.0), 'font_size': 14.0},
+            {'text': 'CHAPTER 1: INTRODUCTION 1',
+             'bbox': (99.0, 130.0, 400.0, 144.0), 'font_size': 12.0},
+        ]
+        self.assertEqual(_heading_candidates(_info([toc]), 'Chapter Heading'), [])
+
+    def test_qualified_chapter_target_still_resolves(self):
+        found = _heading_candidates(self._doc(), 'Chapter Heading (implied by context)')
+        self.assertEqual([ln['text'] for _, ln in found], ['CHAPTER 1: INTRODUCTION'])
+
+
+class FontWeightDetection(unittest.TestCase):
+    """A genuinely bold heading was reported as 'Not bold'.
+
+    pdf_utils rewrites 'TimesNewRomanPS-BoldMT' to the family name 'Times New
+    Roman', and the bold check searched that name for the word 'bold'.
+    """
+
+    @staticmethod
+    def _heading(**span):
+        pg = _page(1)
+        bbox = (200.0, 70.0, 395.0, 88.0)
+        pg['lines'] = [{'text': 'CHAPTER 1: INTRODUCTION', 'bbox': bbox,
+                        'font_size': 14.0}]
+        base = {'text': 'CHAPTER 1: INTRODUCTION', 'font': 'Times New Roman',
+                'size': 14.0, 'bbox': bbox}
+        base.update(span)
+        pg['spans'] = [base]
+        return _info([pg])
+
+    def test_recorded_flag_is_trusted_over_the_normalised_name(self):
+        self.assertTrue(_span_is_bold({'font': 'Times New Roman', 'bold': True}))
+
+    def test_font_name_is_the_fallback_when_no_flag_was_recorded(self):
+        self.assertTrue(_span_is_bold({'font': 'TimesNewRomanPS-BoldMT'}))
+
+    def test_regular_span_is_not_bold(self):
+        self.assertFalse(_span_is_bold({'font': 'Times New Roman', 'bold': False}))
+
+    def test_bold_heading_passes(self):
+        row = _run(_rule(type='heading_bold_required', target='Chapter Heading',
+                         value=True), self._heading(bold=True))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_regular_heading_still_fails(self):
+        row = _run(_rule(type='heading_bold_required', target='Chapter Heading',
+                         value=True), self._heading(bold=False))
+        self.assertEqual(row['status'], 'FAIL')
+
+
+class LineSpacingReporting(unittest.TestCase):
+    """A page with no running prose is not a spacing breach.
+
+    Warning on every cover page and blank leaf made the warning permanent for any
+    compliant thesis, so doubt is now reported only when nothing anywhere in the
+    document could be measured.
+    """
+
+    def test_double_spacing_passes(self):
+        row = _run(_rule(type='line_spacing', value='double'),
+                   _info([_page(1, estimated_line_spacing=2.0)]))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_unmeasurable_page_does_not_warn_when_prose_pages_comply(self):
+        row = _run(_rule(type='line_spacing', value='double'),
+                   _info([_page(1, estimated_line_spacing=None),
+                          _page(2, estimated_line_spacing=2.0)]))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_wrong_spacing_still_fails(self):
+        row = _run(_rule(type='line_spacing', value='double'),
+                   _info([_page(1, estimated_line_spacing=None),
+                          _page(2, estimated_line_spacing=1.15)]))
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_document_with_nothing_measurable_is_still_flagged(self):
+        row = _run(_rule(type='line_spacing', value='double'),
+                   _info([_page(1, estimated_line_spacing=None)]))
+        self.assertEqual(row['status'], 'WARNING')
+
+
+class PdfMeasurement(unittest.TestCase):
+    """inspect_pdf must observe double spacing and record the font weight.
+
+    MuPDF starts a new block once the baseline gap passes roughly 1.5 em, so
+    pairing lines only inside a block made every double-spaced page unmeasurable.
+    """
+
+    PROSE = 'hospital information systems accumulate continuous measurements daily'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _pdf(self, pitch, bold_heading=False):
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        for i in range(4):
+            page.insert_text((99.2, 120 + pitch * i), self.PROSE,
+                             fontname='tiro', fontsize=12)
+        if bold_heading:
+            page.insert_text((200.0, 400.0), 'CHAPTER 1: INTRODUCTION',
+                             fontname='tibo', fontsize=14)
+        path = str(Path(self.tmp) / f'p{pitch}{bold_heading}.pdf')
+        doc.save(path)
+        doc.close()
+        return path
+
+    def test_double_spacing_is_measured(self):
+        measured = inspect_pdf(self._pdf(24.0))['pages'][0]['estimated_line_spacing']
+        self.assertAlmostEqual(measured if measured is not None else 0.0, 2.0,
+                               places=1)
+
+    def test_single_spacing_is_still_measured(self):
+        info = inspect_pdf(self._pdf(14.0))
+        self.assertLess(info['pages'][0]['estimated_line_spacing'], 1.3)
+
+    def test_span_weight_is_recorded(self):
+        info = inspect_pdf(self._pdf(24.0, bold_heading=True))
+        heading = next(s for s in info['pages'][0]['spans']
+                       if s['text'].startswith('CHAPTER'))
+        self.assertTrue(heading.get('bold'))
+
+    def test_body_span_is_not_marked_bold(self):
+        info = inspect_pdf(self._pdf(24.0, bold_heading=True))
+        body = next(s for s in info['pages'][0]['spans']
+                    if s['text'].startswith('hospital'))
+        self.assertIs(body.get('bold'), False)
 
 
 if __name__ == '__main__':

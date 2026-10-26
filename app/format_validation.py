@@ -130,6 +130,27 @@ def _same_font(a,b):
     return bool(aa and bb and (aa==bb or aa in bb or bb in aa))
 
 
+def _span_is_bold(span):
+    """True when a span is bold.
+
+    ``pdf_utils`` normalises font names to the family, so the weight no longer
+    survives in the name. Prefer the flag it now records and fall back to the
+    name for span dictionaries built elsewhere.
+    """
+    flag = span.get('bold')
+    if flag is not None:
+        return bool(flag)
+    return 'bold' in str(span.get('font', '')).lower()
+
+
+def _span_is_italic(span):
+    """True when a span is italic. See :func:`_span_is_bold`."""
+    flag = span.get('italic')
+    if flag is not None:
+        return bool(flag)
+    return 'italic' in str(span.get('font', '')).lower()
+
+
 def _occ(page, location, detected, snippet='', bbox=None):
     return {'page':page,'location':location,'detected':detected,'snippet':(snippet or '')[:220],'bbox':bbox}
 
@@ -176,6 +197,17 @@ def _find_section(text, target):
     return None
 
 
+# One pattern per heading level. A single shared pattern would hand the chapter
+# rule and the section rule the same lines, and those rules require different
+# sizes of the lines they are given, which no document can satisfy at once.
+_HEADING_LEVEL_PATTERNS = {
+    'chapter heading': re.compile(r'^chapter\s+\w+', re.I),
+    'section heading': re.compile(r'^\d+\.\d+(?!\.\d)\s+\S+'),
+    'third level heading': re.compile(r'^\d+\.\d+\.\d+\s+\S+'),
+    'heading': re.compile(r'^(?:chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)', re.I),
+}
+
+
 def _heading_candidates(info, target):
     """Lines that plausibly are the heading a ``heading_*`` rule targets.
 
@@ -190,13 +222,17 @@ def _heading_candidates(info, target):
     for name in names:
         low=name.lower()
         if not low: continue
+        pattern=_HEADING_LEVEL_PATTERNS.get(low)
         found=[]
         for pg in info.get('pages',[]):
+            # Contents entries repeat the text of every heading in the document, so
+            # matching them would hand each level's rule the other level's lines.
+            if pattern is not None and _is_toc_page(pg): continue
             for ln in pg.get('lines',[]):
                 txt=(ln.get('text') or '').strip()
                 if not txt: continue
-                if low in {'chapter heading','section heading','heading'}:
-                    if re.match(r'^(chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)',txt,re.I): found.append((pg,ln))
+                if pattern is not None:
+                    if pattern.match(txt): found.append((pg,ln))
                 elif low in txt.lower(): found.append((pg,ln))
         if found: return found
     return []
@@ -493,12 +529,20 @@ def validate_format_profile(profile, info):
                 # Per-page spacing is a whole-document measurement; a section-scoped
                 # spacing rule cannot be decided from it.
                 out.append(_not_verified('LINE_SPACING',f'Line spacing ({target})',f'{exp:g}',source,f'Rule applies to "{target}" only, which the per-page spacing measurement cannot isolate',severity,evidence,section)); continue
+            # A cover page, a blank leaf or an index carries no running prose, so it
+            # has no line spacing to measure. That is not evidence of a breach, and
+            # warning on it would make every compliant thesis carry a warning. Only
+            # report doubt when no page in the document could be measured at all.
+            measured=0
             for pg in info.get('pages',[]):
                 det=pg.get('estimated_line_spacing')
-                if det is None: low.append(_occ(pg['page'],'Body paragraphs','Could not estimate'))
-                elif abs(float(det)-exp)>0.28: occ.append(_occ(pg['page'],'Estimated body line spacing',f'{det}'))
+                if det is None:
+                    low.append(_occ(pg['page'],'Body paragraphs','No measurable body paragraph'))
+                    continue
+                measured+=1
+                if abs(float(det)-exp)>0.28: occ.append(_occ(pg['page'],'Estimated body line spacing',f'{det}'))
             if occ: out.append(_consolidate('LINE_SPACING','Line spacing',f'{exp:g}',source,occ,'Estimated line spacing differs from the guideline requirement.','Adjust the listed paragraphs/pages to the required line spacing.',severity=severity,source_text=evidence,source_section=section))
-            elif low and mandatory: out.append(_consolidate('LINE_SPACING_VERIFY','Line spacing',f'{exp:g}',source,low,'Line spacing could not be measured reliably on some pages.','Review the listed pages manually.',status='WARNING',severity='Mandatory',source_text=evidence,source_section=section))
+            elif not measured and low and mandatory: out.append(_consolidate('LINE_SPACING_VERIFY','Line spacing',f'{exp:g}',source,low,'Line spacing could not be measured on any page of the document.','Review the listed pages manually.',status='WARNING',severity='Mandatory',source_text=evidence,source_section=section))
 
         elif kind in {'min_pages','max_pages'} and expected is not None:
             exp=_parse_num(expected)
@@ -577,7 +621,7 @@ def validate_format_profile(profile, info):
 
         elif kind=='body_regular_required' and bool(expected):
             for pg in info.get('pages',[]):
-                bad=[sp for sp in pg.get('spans',[]) if len(sp.get('text',''))>20 and ('bold' in str(sp.get('font','')).lower() or 'italic' in str(sp.get('font','')).lower())]
+                bad=[sp for sp in pg.get('spans',[]) if len(sp.get('text',''))>20 and (_span_is_bold(sp) or _span_is_italic(sp))]
                 # Only fail when styled long spans dominate enough to look like body text, not headings/emphasis.
                 if len(bad)>=3:
                     for sp in bad[:8]: occ.append(_occ(pg['page'],'Body text style',sp.get('font',''),sp.get('text',''),sp.get('bbox')))
@@ -612,7 +656,7 @@ def validate_format_profile(profile, info):
                     if exp is not None and det and not _num_ok(det,exp,op,0.7): occ.append(_occ(pg['page'],txt,f'{det:g} pt',txt,bbox))
                 elif kind=='heading_bold_required' and bool(expected):
                     # line metadata lacks font flags, infer from spans intersecting bbox
-                    bold=any('bold' in str(sp.get('font','')).lower() and abs(sp.get('bbox',(0,0,0,0))[1]-bbox[1])<3 for sp in pg.get('spans',[]))
+                    bold=any(_span_is_bold(sp) and abs(sp.get('bbox',(0,0,0,0))[1]-bbox[1])<3 for sp in pg.get('spans',[]))
                     if not bold: occ.append(_occ(pg['page'],txt,'Not bold',txt,bbox))
             if occ:
                 exp = expected

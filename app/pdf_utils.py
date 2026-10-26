@@ -72,7 +72,6 @@ def inspect_pdf(path: str):
         line_spacings = []
 
         for block in d.get('blocks', []):
-            block_lines = []
             for line in block.get('lines', []):
                 bbox = line.get('bbox') or (0,0,0,0)
                 line_text_parts=[]; line_sizes=[]
@@ -81,9 +80,17 @@ def inspect_pdf(path: str):
                     if not text:
                         continue
                     size = round(float(span.get('size') or 0),1)
-                    font = _norm_font(span.get('font') or '')
+                    raw_font = span.get('font') or ''
+                    font = _norm_font(raw_font)
                     sb = tuple(round(float(x),1) for x in (span.get('bbox') or (0,0,0,0)))
-                    item={'text':text,'font':font,'size':size,'bbox':sb}
+                    # _norm_font collapses every weight to the family name, so record
+                    # the style here or 'TimesNewRomanPS-BoldMT' is indistinguishable
+                    # from the regular face and no bold check can ever succeed.
+                    flags = int(span.get('flags') or 0)
+                    low_font = raw_font.lower()
+                    item={'text':text,'font':font,'size':size,'bbox':sb,
+                          'bold':bool(flags & 16) or 'bold' in low_font,
+                          'italic':bool(flags & 2) or 'italic' in low_font or 'oblique' in low_font}
                     spans.append(item)
                     w=len(text)
                     font_sizes.append(size); all_font_weighted.append((font,w)); all_size_weighted.append((size,w))
@@ -93,7 +100,6 @@ def inspect_pdf(path: str):
                     line_text=' '.join(line_text_parts)
                     avg_size=round(sum(line_sizes)/len(line_sizes),1) if line_sizes else 0
                     lines_meta.append({'text':line_text,'bbox':lb,'font_size':avg_size})
-                    block_lines.append(lines_meta[-1])
                     # Generic content area retained for diagnostics only.
                     ymid=(lb[1]+lb[3])/2
                     if rect.height*0.07 <= ymid <= rect.height*0.93:
@@ -113,12 +119,24 @@ def inspect_pdf(path: str):
                     body_size=9.0 <= avg_size <= 14.5
                     if long_enough and body_size and not is_all_caps and not is_dot_leader and not is_caption and not is_numbered_heading:
                         body_lines.append({'text': stripped, 'bbox': lb, 'font_size': avg_size})
-            for a,b in zip(block_lines, block_lines[1:]):
-                if a['font_size'] and b['font_size']:
-                    baseline_gap = b['bbox'][1]-a['bbox'][1]
-                    fs=(a['font_size']+b['font_size'])/2
-                    if 0.8*fs <= baseline_gap <= 3.0*fs:
-                        line_spacings.append(baseline_gap/fs)
+
+        # Line spacing is measured over the page's body lines in reading order
+        # rather than within a MuPDF block. MuPDF starts a new block as soon as the
+        # baseline gap passes roughly 1.5 em, so a genuinely double-spaced page puts
+        # every line in a block of its own and a per-block pairing can never observe
+        # the 2.0 the guideline asks for.
+        ordered = sorted(body_lines, key=lambda x: x['bbox'][1])
+        for a, b in zip(ordered, ordered[1:]):
+            if not (a['font_size'] and b['font_size']):
+                continue
+            # Neighbouring lines of one text column overlap horizontally; lines in
+            # different columns do not, and their gap is not a line spacing.
+            if min(a['bbox'][2], b['bbox'][2]) <= max(a['bbox'][0], b['bbox'][0]):
+                continue
+            baseline_gap = b['bbox'][1] - a['bbox'][1]
+            fs = (a['font_size'] + b['font_size']) / 2
+            if 0.8*fs <= baseline_gap <= 3.0*fs:
+                line_spacings.append(baseline_gap/fs)
 
         margins={}
         # For PDF validation we cannot recover the original Word margin settings.
