@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import asyncio
 import logging
@@ -60,15 +61,63 @@ qdrant_error = None
 
 
 # -----------------------------
-# Startup
+# Startup pre-flight checks
 # -----------------------------
 
+SEP = "=" * 60
 
-@app.on_event("startup")
-async def startup_event():
+
+def _preflight_banner(label: str, ok: bool, detail: str = "") -> None:
+    icon = "✅" if ok else "❌"
+    status = "OK" if ok else "FAILED"
+    msg = f"{icon}  [{status}] {label}"
+    if detail:
+        msg += f"  →  {detail}"
+    (logger.info if ok else logger.error)(msg)
+
+
+async def _check_ollama() -> tuple[bool, str]:
+    """Verify Ollama server is reachable and the configured model is available."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            r.raise_for_status()
+            data = r.json()
+
+        installed = [m["name"] for m in data.get("models", [])]
+        # Match by exact name or by base name (without tag)
+        model_ready = any(
+            m == DEFAULT_LLM_MODEL or m.split(":")[0] == DEFAULT_LLM_MODEL.split(":")[0]
+            for m in installed
+        )
+        if not model_ready:
+            return False, (
+                f"Model '{DEFAULT_LLM_MODEL}' not found. "
+                f"Installed: {installed or ['(none)']}"
+            )
+        return True, f"model='{DEFAULT_LLM_MODEL}'  url={OLLAMA_URL}"
+    except httpx.ConnectError:
+        return False, f"Cannot reach Ollama at {OLLAMA_URL} (connection refused)"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _check_qdrant_sync() -> tuple[bool, str]:
+    """Try to connect to Qdrant and list collections."""
+    try:
+        client = QdrantClient(
+            url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None
+        )
+        info = client.info()
+        client.get_collections()
+        return True, f"server={info.version}  url={QDRANT_URL}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _check_embedding_sync() -> tuple[bool, str]:
+    """Load the embedding model (heavy — runs once at startup)."""
     global embedding_model, embedding_status, embedding_error
-    global qdrant_client, qdrant_status, qdrant_error
-
     try:
         from FlagEmbedding import BGEM3FlagModel
 
@@ -76,30 +125,62 @@ async def startup_event():
         embedding_model = BGEM3FlagModel(EMBEDDING_MODEL_NAME, use_fp16=True)
         embedding_status = "ready"
         embedding_error = None
-
-    except Exception as e:
+        return True, f"model='{EMBEDDING_MODEL_NAME}'"
+    except Exception as exc:
         embedding_status = "error"
-        embedding_error = str(e)
-        logger.exception("Embedding startup failed")
+        embedding_error = str(exc)
+        return False, str(exc)
 
-    try:
-        qdrant_status = "connecting"
+
+@app.on_event("startup")
+async def startup_event():
+    global qdrant_client, qdrant_status, qdrant_error
+
+    logger.info(SEP)
+    logger.info("🚀  UniSubmit AI Service — startup pre-flight checks")
+    logger.info(SEP)
+
+    failures: list[str] = []
+
+    # 1. Ollama server + model (CRITICAL)
+    ollama_ok, ollama_detail = await _check_ollama()
+    _preflight_banner("Ollama LLM", ollama_ok, ollama_detail)
+    if not ollama_ok:
+        failures.append(f"Ollama: {ollama_detail}")
+
+    # 2. Qdrant vector DB (CRITICAL)
+    qdrant_ok, qdrant_detail = await asyncio.to_thread(_check_qdrant_sync)
+    _preflight_banner("Qdrant vector DB", qdrant_ok, qdrant_detail)
+    if qdrant_ok:
         qdrant_client = QdrantClient(
             url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None
         )
-        logger.info(
-            "Qdrant client=%s server=%s",
-            package_version("qdrant-client"),
-            qdrant_client.info().version,
-        )
-        qdrant_client.get_collections()
         qdrant_status = "ready"
         qdrant_error = None
-
-    except Exception as e:
+    else:
         qdrant_status = "error"
-        qdrant_error = str(e)
-        logger.exception("Qdrant startup failed")
+        qdrant_error = qdrant_detail
+        failures.append(f"Qdrant: {qdrant_detail}")
+
+    # 3. Embedding model (CRITICAL — needed for indexing/search)
+    emb_ok, emb_detail = await asyncio.to_thread(_check_embedding_sync)
+    _preflight_banner(f"Embedding model ({EMBEDDING_MODEL_NAME})", emb_ok, emb_detail)
+    if not emb_ok:
+        failures.append(f"Embedding: {emb_detail}")
+
+    logger.info(SEP)
+    if failures:
+        logger.error("🔴  PRE-FLIGHT FAILED — the following services are unavailable:")
+        for f in failures:
+            logger.error("    •  %s", f)
+        logger.error("Shutting down. Fix the issues above and restart the service.")
+        logger.info(SEP)
+        # Give the logger a moment to flush before exiting
+        await asyncio.sleep(0.2)
+        sys.exit(1)
+    else:
+        logger.info("🟢  All pre-flight checks passed — service is ready to serve.")
+        logger.info(SEP)
 
 
 # -----------------------------
