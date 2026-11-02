@@ -6,9 +6,13 @@ yet. Each entry carries enough detail to be picked up without re-investigating.
 Fixed defects are recorded in `unsatisfiable_rules_defects_and_fixes.md` and
 `validation_defects_and_fixes.md`.
 
-| ID | Title | Severity | Blocks | Status |
-|----|-------|----------|--------|--------|
-| OPEN-1 | `heading_case` rejects correct title case | Mandatory rule, always fails | Restoring chapter and section numbering in submissions | Open |
+Every defect and limitation now carries an identifier in the register at
+[`defects/README.md`](defects/README.md), which is the place to add a new
+finding. `OPEN-1` below is [DEF-020](defects/DEF-020.md) there.
+
+| ID | Register | Title | Severity | Blocks | Status |
+|----|----------|-------|----------|--------|--------|
+| OPEN-1 | [DEF-020](defects/DEF-020.md) | `heading_case` rejects correct title case | Mandatory rule, always fails | Restoring chapter and section numbering in submissions | Open |
 
 ---
 

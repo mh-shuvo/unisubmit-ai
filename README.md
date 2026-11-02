@@ -2,6 +2,9 @@
 
 A role-scoped, mobile-friendly academic pre-submission system with an isolated local AI service.
 
+Known defects, fixed defects and standing limitations are recorded in the
+[defect register](docs/defects/README.md).
+
 ## Core roles
 
 ### Super Admin

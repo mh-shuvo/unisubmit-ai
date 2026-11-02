@@ -10,6 +10,21 @@ Eight defects, D1-D8. D1-D6 are rule-evaluation bugs in
 `ai_service/main.py`, and D8 is a concurrency gap between the queue worker and
 any other caller of `/rag/validate`.
 
+These eight are registered as `DEF-008` to `DEF-015` in
+[`defects/README.md`](defects/README.md), which carries their classification and
+links back to the sections below:
+
+| Here | Register | Class |
+|---|---|---|
+| D1 | [DEF-008](defects/DEF-008.md) | `nl-to-rule-translation` |
+| D2 | [DEF-009](defects/DEF-009.md) | `fail-open` |
+| D3 | [DEF-010](defects/DEF-010.md) | `scope-leakage` |
+| D4 | [DEF-011](defects/DEF-011.md) | `scope-leakage` |
+| D5 | [DEF-012](defects/DEF-012.md) | `nl-to-rule-translation` |
+| D6 | [DEF-013](defects/DEF-013.md) | `nl-to-rule-translation` |
+| D7 | [DEF-014](defects/DEF-014.md) | `llm-context-budget` |
+| D8 | [DEF-015](defects/DEF-015.md) | `resource-contention` |
+
 > **Reproducing with `test_job.py`:** that harness calls `process_job()` inline
 > and bypasses `queue_worker`, so running it while the app is live creates
 > exactly the Ollama contention described in D8 and both jobs time out. Stop the

@@ -16,11 +16,11 @@ is recorded separately in `open_defects.md`.
 
 ## Summary
 
-| # | Defect | File | Function | Effect before |
-|---|--------|------|----------|---------------|
-| 1 | Double spacing could not be measured | `app/pdf_utils.py` | `inspect_pdf` | `line_spacing` rule had no PASS path; every compliant thesis carried a permanent WARNING |
-| 2 | Chapter and section rules shared one line list | `app/format_validation.py` | `_heading_candidates` | Any numbered heading took two mandatory FAILs no student could clear |
-| 3 | Font weight erased before the bold check | `app/pdf_utils.py`, `app/format_validation.py` | `inspect_pdf`, `heading_bold_required` | A genuinely bold heading reported "Not bold" |
+| # | Register | Defect | File | Function | Effect before |
+|---|----------|--------|------|----------|---------------|
+| 1 | [DEF-017](defects/DEF-017.md) | Double spacing could not be measured | `app/pdf_utils.py` | `inspect_pdf` | `line_spacing` rule had no PASS path; every compliant thesis carried a permanent WARNING |
+| 2 | [DEF-018](defects/DEF-018.md) | Chapter and section rules shared one line list | `app/format_validation.py` | `_heading_candidates` | Any numbered heading took two mandatory FAILs no student could clear |
+| 3 | [DEF-019](defects/DEF-019.md) | Font weight erased before the bold check | `app/pdf_utils.py`, `app/format_validation.py` | `inspect_pdf`, `heading_bold_required` | A genuinely bold heading reported "Not bold" |
 
 Effect on submission #3 after the fixes: **39 PASS / 1 WARNING** became
 **40 PASS / 0 WARNING**, compliance rate 97.9% to 100%.
