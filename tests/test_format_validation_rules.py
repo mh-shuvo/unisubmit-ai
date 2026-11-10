@@ -18,6 +18,7 @@ And the three defects that made correctly formatted theses fail:
   demanded two different sizes of it, which no document can satisfy
 - font-name normalisation erased the weight before the bold check read it
 """
+import json
 import shutil
 import sys
 import tempfile
@@ -38,6 +39,7 @@ from app.format_validation import (  # noqa: E402
     _span_is_bold,
     _strip_qualifier,
     validate_all_profile_rules,
+    _to_title_case
 )
 from app.pdf_utils import inspect_pdf  # noqa: E402
 
@@ -393,6 +395,72 @@ class PdfMeasurement(unittest.TestCase):
                     if s['text'].startswith('hospital'))
         self.assertIs(body.get('bold'), False)
 
+
+class TitleCase(unittest.TestCase):
+    """
+    Test the title case conversion for heading rules.
+    """
+    def setUp(self):
+        self.pg = {'page': 1, 'width_pt': 595.0, 'height_pt': 842.0, 'width_mm': 210.0,
+            'height_mm': 297.0, 'dominant_font': 'Times New Roman',
+            'dominant_font_size': 12.0, 'estimated_line_spacing': 2.0,
+            'margins': {}, 'spans': [], 'lines': [
+                {'text': '1.1 Background', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
+                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
+            ]}
+        self.info = {'page_count': 1, 'pages': [self.pg], 'text': '', 'searchable': True,
+                    'page_sizes': [(595.0, 842.0)]}
+    
+    def test_to_title_case(self):
+        self.assertEqual(_to_title_case('of mice and man') == 'of mice and man', False)
+        self.assertEqual(_to_title_case('university of ottawa'), 'University of Ottawa')
+        self.assertEqual(_to_title_case('the impact of technology'), 'The Impact of Technology')
+        self.assertEqual(_to_title_case('a study of the effects of technology'), 'A Study of the Effects of Technology')
+        self.assertEqual(_to_title_case('1.1 Background'), '1.1 Background')
+        self.assertEqual(_to_title_case('1.5 Scope and Significance'), '1.5 Scope and Significance')
+        self.assertEqual(_to_title_case("1.1 You and me will buy an AI subscriptions"),"1.1 You and Me Will Buy an AI Subscriptions")
+    
+    def test_uppercase_validation_failed(self):
+        info = self.info
+        info['pages'][0]['lines']= [
+                {'text': '1.1 BACKGROUND', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
+                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
+            ]
+        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'UPPER CASE',
+                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
+        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
+            self.assertEqual(r['status'], 'FAIL')
+    def test_uppercase_validation_success(self):
+        info = self.info
+        info['pages'][0]['lines']= [
+                {'text': '1.1 BACKGROUND', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
+                {'text': '1.5 SCOPE AND SIGNIFICANCE', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
+            ]
+        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'UPPER CASE',
+                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
+        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
+            self.assertEqual(r['status'], 'PASS')
+    def test_title_case_validation_failed(self):
+        info = self.info
+        info['pages'][0]['lines']= [
+                {'text': '1.5 of mice and man', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
+                {'text': '1.1 Something to', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
+            ]
+        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'Title Case',
+                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
+        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
+            self.assertEqual(r['status'], 'FAIL')
+    def test_title_case_validation_success(self):
+        info = self.info
+        info['pages'][0]['lines']= [
+                {'text': '1.1 Background', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
+                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
+            ]
+        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'Title Case',
+                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
+        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
+            self.assertEqual(r['status'], 'PASS')
+            print(r['status'], '|', r['detected'])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

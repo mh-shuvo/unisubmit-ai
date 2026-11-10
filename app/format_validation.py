@@ -442,7 +442,40 @@ def _cover_layout_results(profile, info):
         source_text='Visual cover/title-page sample in the approved guideline'
     )]
 
+_SMALL_WORDS = {
+    # articles
+    "a", "an", "the",
+    # coordinating conjunctions
+    "and", "but", "or", "nor", "for", "so", "yet",
+    # short prepositions (≤4 letters)
+    "as", "at", "by", "in", "of", "off", "on", "per",
+    "to", "up", "via",
+    "from", "into", "like", "near", "over", "past",
+    "than", "upon", "with",
+}
 
+def _to_title_case(s):
+    words = s.split(" ")
+    out = []
+    n = len(words)
+    for i, w in enumerate(words):
+        if not w:
+            out.append(w)
+            continue
+        if w.isupper():
+            out.append(w)
+            continue
+        lower = w.lower()
+        # first or last word always capitalized
+        if i == 0 or i == n - 1:
+            out.append(w[:1].upper() + w[1:].lower())
+        elif lower in _SMALL_WORDS:
+            out.append(lower)
+        else:
+            out.append(w[:1].upper() + w[1:].lower())
+    return " ".join(out)
+def _needs_title_case_fix(s:str) ->bool:
+    return _to_title_case(s) != s
 def validate_format_profile(profile, info):
     if not profile: return []
     if isinstance(profile,str):
@@ -636,8 +669,8 @@ def validate_format_profile(profile, info):
             for pg,ln in candidates:
                 txt=(ln.get('text') or '').strip()
                 letters=''.join(ch for ch in txt if ch.isalpha())
-                if str(expected).lower()=='all caps' and letters and letters != letters.upper(): occ.append(_occ(pg['page'],txt,'Not ALL CAPS',txt,ln.get('bbox')))
-                elif str(expected).lower()=='title case' and txt and txt != txt.title(): occ.append(_occ(pg['page'],txt,'Not Title Case',txt,ln.get('bbox')))
+                if (str(expected).lower()=='all caps' or str(expected).lower()=='upper case' or str(expected).lower()=='uppercase') and letters and letters != letters.upper(): occ.append(_occ(pg['page'],txt,f'Not {expected}',txt,ln.get('bbox')))
+                elif str(expected).lower()=='title case' and txt and _needs_title_case_fix(txt): occ.append(_occ(pg['page'],txt,'Not Title Case',txt,ln.get('bbox')))
             if occ: out.append(_consolidate(f'HEADING_CASE_{idx}',f'{target}: Heading Case',str(expected),source,occ,'One or more headings do not match the required capitalization.','Correct the capitalization of the listed headings.',severity=severity,source_text=evidence,source_section=section))
 
         elif kind in {'heading_alignment','heading_font_size_pt','heading_bold_required'} and target:
