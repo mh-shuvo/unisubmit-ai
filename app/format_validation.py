@@ -130,6 +130,27 @@ def _same_font(a,b):
     return bool(aa and bb and (aa==bb or aa in bb or bb in aa))
 
 
+def _span_is_bold(span):
+    """True when a span is bold.
+
+    ``pdf_utils`` normalises font names to the family, so the weight no longer
+    survives in the name. Prefer the flag it now records and fall back to the
+    name for span dictionaries built elsewhere.
+    """
+    flag = span.get('bold')
+    if flag is not None:
+        return bool(flag)
+    return 'bold' in str(span.get('font', '')).lower()
+
+
+def _span_is_italic(span):
+    """True when a span is italic. See :func:`_span_is_bold`."""
+    flag = span.get('italic')
+    if flag is not None:
+        return bool(flag)
+    return 'italic' in str(span.get('font', '')).lower()
+
+
 def _occ(page, location, detected, snippet='', bbox=None):
     return {'page':page,'location':location,'detected':detected,'snippet':(snippet or '')[:220],'bbox':bbox}
 
@@ -176,6 +197,17 @@ def _find_section(text, target):
     return None
 
 
+# One pattern per heading level. A single shared pattern would hand the chapter
+# rule and the section rule the same lines, and those rules require different
+# sizes of the lines they are given, which no document can satisfy at once.
+_HEADING_LEVEL_PATTERNS = {
+    'chapter heading': re.compile(r'^chapter\s+\w+', re.I),
+    'section heading': re.compile(r'^\d+\.\d+(?!\.\d)\s+\S+'),
+    'third level heading': re.compile(r'^\d+\.\d+\.\d+\s+\S+'),
+    'heading': re.compile(r'^(?:chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)', re.I),
+}
+
+
 def _heading_candidates(info, target):
     """Lines that plausibly are the heading a ``heading_*`` rule targets.
 
@@ -190,13 +222,17 @@ def _heading_candidates(info, target):
     for name in names:
         low=name.lower()
         if not low: continue
+        pattern=_HEADING_LEVEL_PATTERNS.get(low)
         found=[]
         for pg in info.get('pages',[]):
+            # Contents entries repeat the text of every heading in the document, so
+            # matching them would hand each level's rule the other level's lines.
+            if pattern is not None and _is_toc_page(pg): continue
             for ln in pg.get('lines',[]):
                 txt=(ln.get('text') or '').strip()
                 if not txt: continue
-                if low in {'chapter heading','section heading','heading'}:
-                    if re.match(r'^(chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)',txt,re.I): found.append((pg,ln))
+                if pattern is not None:
+                    if pattern.match(txt): found.append((pg,ln))
                 elif low in txt.lower(): found.append((pg,ln))
         if found: return found
     return []
@@ -406,6 +442,161 @@ def _cover_layout_results(profile, info):
         source_text='Visual cover/title-page sample in the approved guideline'
     )]
 
+_SMALL_WORDS = {
+    # articles
+    "a", "an", "the",
+    # coordinating conjunctions
+    "and", "but", "or", "nor", "for", "so", "yet",
+    # short prepositions (≤4 letters)
+    "as", "at", "by", "in", "of", "off", "on", "per",
+    "to", "up", "via",
+    "from", "into", "like", "near", "over", "past",
+    "than", "upon", "with",
+}
+
+def _to_title_case(s):
+    words = s.split(" ")
+    out = []
+    n = len(words)
+    for i, w in enumerate(words):
+        if not w:
+            out.append(w)
+            continue
+        if w.isupper():
+            out.append(w)
+            continue
+        lower = w.lower()
+        # first or last word always capitalized
+        if i == 0 or i == n - 1:
+            out.append(w[:1].upper() + w[1:].lower())
+        elif lower in _SMALL_WORDS:
+            out.append(lower)
+        else:
+            out.append(w[:1].upper() + w[1:].lower())
+    return " ".join(out)
+def _needs_title_case_fix(s:str) ->bool:
+    return _to_title_case(s) != s
+
+
+def _normalize_alignment(value):
+    """Map a guideline's alignment wording to 'center', 'left' or 'right'.
+
+    Lenient substring match, not an exact lookup, so phrasings like
+    'flush left', 'left-aligned' or 'center-aligned' all resolve the same
+    as the bare word. Returns None for wording this can't classify, so the
+    caller skips the check rather than guessing which side was meant.
+    """
+    v=str(value or '').strip().lower()
+    if not v: return None
+    if 'center' in v or 'centre' in v: return 'center'
+    if 'left' in v: return 'left'
+    if 'right' in v: return 'right'
+    return None
+
+
+# Mirrors pdf_utils.PT_TO_MM; duplicated to keep format_validation decoupled
+# from pdf_utils rather than importing it for one constant.
+_PT_TO_MM = 25.4 / 72.0
+
+
+def _document_margins_mm(info):
+    """The first usable (left_mm, right_mm) pair found across the document.
+
+    A heading-only page often has no body-text evidence of its own, so its
+    own ``margins`` dict can be empty. Margins are consistent throughout a
+    thesis, so borrowing another page's measurement is a safe fallback.
+    Returns (None, None) if no page has margin evidence at all.
+    """
+    for pg in info.get('pages',[]):
+        m=pg.get('margins') or {}
+        left,right=m.get('left_mm'),m.get('right_mm')
+        if left is not None and right is not None: return left,right
+    return None,None
+
+
+def _heading_alignment(pg, info, bbox):
+    """Classify a heading line as 'center', 'left', 'right' or None (unclear).
+
+    Checks the margin anchors before the page-center tolerance, not after:
+    the center tolerance is deliberately wide (headings of different widths
+    must all read as centered), and on a page with asymmetric margins a
+    long flush-left heading's midpoint can drift inside that wide center
+    band even though its left edge sits exactly on the left margin. A tight
+    margin match is the more specific signal, so it must win first.
+    """
+    page_w=pg.get('width_pt') or 595
+    m=pg.get('margins') or {}
+    left_mm,right_mm=m.get('left_mm'),m.get('right_mm')
+    if left_mm is None or right_mm is None:
+        left_mm,right_mm=_document_margins_mm(info)
+    tol=10.0
+    if left_mm is not None and right_mm is not None:
+        left_margin_pt=left_mm/_PT_TO_MM
+        right_margin_pt=page_w-right_mm/_PT_TO_MM
+        if abs(bbox[0]-left_margin_pt) < tol: return 'left'
+        if abs(bbox[2]-right_margin_pt) < tol: return 'right'
+        mid=(bbox[0]+bbox[2])/2
+        return 'center' if abs(mid-page_w/2) < page_w*0.08 else None
+    # No margin evidence anywhere in the document: fall back to a best-effort
+    # page-edge comparison rather than refusing to classify at all.
+    mid=(bbox[0]+bbox[2])/2
+    if abs(mid-page_w/2) < page_w*0.08: return 'center'
+    return 'left' if bbox[0] <= page_w-bbox[2] else 'right'
+
+
+_CAPTION_LINE_RE=re.compile(r'^(?:figure|table)\s+\d',re.I)
+_NUMBERED_HEADING_LINE_RE=re.compile(r'^(?:chapter\s+\w+|\d+(?:\.\d+)+)\b',re.I)
+
+
+def _is_body_text_line(text, font_size):
+    """True for an ordinary paragraph line, not a heading, caption or TOC entry.
+
+    Mirrors the body-line filter ``pdf_utils.inspect_pdf`` uses for its own
+    margin/line-spacing evidence (long, body-sized, not all-caps/caption/
+    numbered-heading); duplicated here because that filtered list isn't
+    part of the ``info`` structure handed to this module.
+    """
+    stripped=(text or '').strip()
+    if len(stripped) < 35: return False
+    if not (9.0 <= (font_size or 0) <= 14.5): return False
+    letters=''.join(ch for ch in stripped if ch.isalpha())
+    if letters and letters == letters.upper(): return False
+    if '....' in stripped: return False
+    if _CAPTION_LINE_RE.match(stripped): return False
+    if _NUMBERED_HEADING_LINE_RE.match(stripped): return False
+    return True
+
+
+def _page_body_alignment(pg):
+    """Classify one page's body paragraphs as 'justified', 'left', 'right',
+    or None when there isn't enough body text (or no edge is consistent
+    enough to call) on the page.
+
+    Checking only the right edge cannot tell justified from right-aligned:
+    both have (almost) every line's right edge flush against the same x,
+    the difference is whether the *left* edge is also consistent or ragged.
+    So this checks both edges against their own percentile-based reference
+    (90th for the right margin, 10th for the left margin -- the same trick
+    ``pdf_utils`` uses for its own margin measurement) rather than trying to
+    segment paragraphs to drop each one's short last line: one short line
+    per paragraph barely moves either percentile or either tight-fraction.
+    Centered body text is not handled -- essentially unheard of for thesis
+    paragraphs, and would need a different signal (line midpoints, not
+    edges) to detect.
+    """
+    lines=[ln for ln in pg.get('lines',[]) if _is_body_text_line(ln.get('text'),ln.get('font_size'))]
+    if len(lines) < 4: return None
+    lefts=sorted(ln['bbox'][0] for ln in lines)
+    rights=sorted(ln['bbox'][2] for ln in lines)
+    left_margin=lefts[int(0.1*(len(lefts)-1))]
+    right_margin=rights[int(0.9*(len(rights)-1))]
+    left_tight=sum(1 for x in lefts if x-left_margin <= 6.0)/len(lefts)
+    right_tight=sum(1 for x in rights if right_margin-x <= 6.0)/len(rights)
+    if right_tight >= 0.6 and left_tight >= 0.6: return 'justified'
+    if right_tight >= 0.6: return 'right'
+    if left_tight >= 0.6: return 'left'
+    return None
+
 
 def validate_format_profile(profile, info):
     if not profile: return []
@@ -493,12 +684,20 @@ def validate_format_profile(profile, info):
                 # Per-page spacing is a whole-document measurement; a section-scoped
                 # spacing rule cannot be decided from it.
                 out.append(_not_verified('LINE_SPACING',f'Line spacing ({target})',f'{exp:g}',source,f'Rule applies to "{target}" only, which the per-page spacing measurement cannot isolate',severity,evidence,section)); continue
+            # A cover page, a blank leaf or an index carries no running prose, so it
+            # has no line spacing to measure. That is not evidence of a breach, and
+            # warning on it would make every compliant thesis carry a warning. Only
+            # report doubt when no page in the document could be measured at all.
+            measured=0
             for pg in info.get('pages',[]):
                 det=pg.get('estimated_line_spacing')
-                if det is None: low.append(_occ(pg['page'],'Body paragraphs','Could not estimate'))
-                elif abs(float(det)-exp)>0.28: occ.append(_occ(pg['page'],'Estimated body line spacing',f'{det}'))
+                if det is None:
+                    low.append(_occ(pg['page'],'Body paragraphs','No measurable body paragraph'))
+                    continue
+                measured+=1
+                if abs(float(det)-exp)>0.28: occ.append(_occ(pg['page'],'Estimated body line spacing',f'{det}'))
             if occ: out.append(_consolidate('LINE_SPACING','Line spacing',f'{exp:g}',source,occ,'Estimated line spacing differs from the guideline requirement.','Adjust the listed paragraphs/pages to the required line spacing.',severity=severity,source_text=evidence,source_section=section))
-            elif low and mandatory: out.append(_consolidate('LINE_SPACING_VERIFY','Line spacing',f'{exp:g}',source,low,'Line spacing could not be measured reliably on some pages.','Review the listed pages manually.',status='WARNING',severity='Mandatory',source_text=evidence,source_section=section))
+            elif not measured and low and mandatory: out.append(_consolidate('LINE_SPACING_VERIFY','Line spacing',f'{exp:g}',source,low,'Line spacing could not be measured on any page of the document.','Review the listed pages manually.',status='WARNING',severity='Mandatory',source_text=evidence,source_section=section))
 
         elif kind in {'min_pages','max_pages'} and expected is not None:
             exp=_parse_num(expected)
@@ -577,7 +776,7 @@ def validate_format_profile(profile, info):
 
         elif kind=='body_regular_required' and bool(expected):
             for pg in info.get('pages',[]):
-                bad=[sp for sp in pg.get('spans',[]) if len(sp.get('text',''))>20 and ('bold' in str(sp.get('font','')).lower() or 'italic' in str(sp.get('font','')).lower())]
+                bad=[sp for sp in pg.get('spans',[]) if len(sp.get('text',''))>20 and (_span_is_bold(sp) or _span_is_italic(sp))]
                 # Only fail when styled long spans dominate enough to look like body text, not headings/emphasis.
                 if len(bad)>=3:
                     for sp in bad[:8]: occ.append(_occ(pg['page'],'Body text style',sp.get('font',''),sp.get('text',''),sp.get('bbox')))
@@ -592,8 +791,8 @@ def validate_format_profile(profile, info):
             for pg,ln in candidates:
                 txt=(ln.get('text') or '').strip()
                 letters=''.join(ch for ch in txt if ch.isalpha())
-                if str(expected).lower()=='all caps' and letters and letters != letters.upper(): occ.append(_occ(pg['page'],txt,'Not ALL CAPS',txt,ln.get('bbox')))
-                elif str(expected).lower()=='title case' and txt and txt != txt.title(): occ.append(_occ(pg['page'],txt,'Not Title Case',txt,ln.get('bbox')))
+                if (str(expected).lower()=='all caps' or str(expected).lower()=='upper case' or str(expected).lower()=='uppercase') and letters and letters != letters.upper(): occ.append(_occ(pg['page'],txt,f'Not {expected}',txt,ln.get('bbox')))
+                elif str(expected).lower()=='title case' and txt and _needs_title_case_fix(txt): occ.append(_occ(pg['page'],txt,'Not Title Case',txt,ln.get('bbox')))
             if occ: out.append(_consolidate(f'HEADING_CASE_{idx}',f'{target}: Heading Case',str(expected),source,occ,'One or more headings do not match the required capitalization.','Correct the capitalization of the listed headings.',severity=severity,source_text=evidence,source_section=section))
 
         elif kind in {'heading_alignment','heading_font_size_pt','heading_bold_required'} and target:
@@ -603,20 +802,40 @@ def validate_format_profile(profile, info):
                 out.append(_not_verified(f'HEADING_{kind}_{idx}',f'{target}: {kind.replace("_"," ").title()}',str(expected),source,f'No document heading matched the target "{target}"',severity,evidence,section)); continue
             for pg,ln in candidates:
                 txt=(ln.get('text') or '').strip()
-                bbox=ln.get('bbox',(0,0,0,0)); page_w=pg.get('width_pt') or 595
+                bbox=ln.get('bbox',(0,0,0,0));
                 if kind=='heading_alignment':
-                    det='center' if abs(((bbox[0]+bbox[2])/2)-page_w/2) < page_w*0.08 else 'left/right'
-                    if str(expected).lower().startswith('center') and det!='center': occ.append(_occ(pg['page'],txt,det,txt,bbox))
+                    det=_heading_alignment(pg,info,bbox)
+                    exp_align=_normalize_alignment(expected)
+                    if exp_align and det and det!=exp_align: occ.append(_occ(pg['page'],txt,det,txt,bbox))
                 elif kind=='heading_font_size_pt':
                     det=float(ln.get('font_size') or 0); exp,op=_parse_num_op(expected)
                     if exp is not None and det and not _num_ok(det,exp,op,0.7): occ.append(_occ(pg['page'],txt,f'{det:g} pt',txt,bbox))
                 elif kind=='heading_bold_required' and bool(expected):
                     # line metadata lacks font flags, infer from spans intersecting bbox
-                    bold=any('bold' in str(sp.get('font','')).lower() and abs(sp.get('bbox',(0,0,0,0))[1]-bbox[1])<3 for sp in pg.get('spans',[]))
+                    bold=any(_span_is_bold(sp) and abs(sp.get('bbox',(0,0,0,0))[1]-bbox[1])<3 for sp in pg.get('spans',[]))
                     if not bold: occ.append(_occ(pg['page'],txt,'Not bold',txt,bbox))
             if occ:
                 exp = expected
                 out.append(_consolidate(f'HEADING_{kind}_{idx}',f'{target}: {kind.replace("_"," ").title()}',str(exp),source,occ,'One or more headings do not match the explicit guideline style.','Correct the listed headings to match the guideline.',severity=severity,source_text=evidence,source_section=section))
+
+        elif kind=='body_alignment' and expected:
+            # Lenient substring match for 'justified' (mirrors _normalize_alignment),
+            # exact-list match for 'left'/'right' wording. 'center' is not offered:
+            # _page_body_alignment never returns it, so it could only ever produce
+            # NOT VERIFIED-by-mismatch rather than a real check.
+            exp_low=str(expected).strip().lower()
+            if 'justif' in exp_low: exp_align='justified'
+            elif exp_low in {'left','flush left','left-aligned','left aligned'}: exp_align='left'
+            elif exp_low in {'right','flush right','right-aligned','right aligned'}: exp_align='right'
+            else:
+                out.append(_not_verified('BODY_ALIGNMENT','Body text alignment',str(expected),source,f'Alignment "{expected}" is not one this checker can classify (only justified, left or right are supported)',severity,evidence,section)); continue
+            measured=[(pg['page'],_page_body_alignment(pg)) for pg in info.get('pages',[])]
+            measured=[(pg_num,det) for pg_num,det in measured if det is not None]
+            if not measured:
+                out.append(_not_verified('BODY_ALIGNMENT','Body text alignment',str(expected),source,'No page had enough ordinary body-text lines to measure alignment',severity,evidence,section)); continue
+            for pg_num,det in measured:
+                if det != exp_align: occ.append(_occ(pg_num,'Body text alignment',det))
+            if occ: out.append(_consolidate('BODY_ALIGNMENT','Body text alignment',str(expected),source,occ,'Body paragraphs do not match the required text alignment.','Set the affected paragraphs to the required alignment.',severity=severity,source_text=evidence,source_section=section))
 
     out.extend(_cover_layout_results(profile,info))
     # Advisory rules never block a submission. Represent their mismatches as warnings.
@@ -631,7 +850,7 @@ _SUPPORTED_RULE_KINDS = {
     'margin_top_mm','margin_bottom_mm','line_spacing','min_pages','max_pages',
     'required_section','section_max_words','section_min_words','page_numbering_required',
     'section_forbidden_element','body_regular_required','heading_case','heading_alignment',
-    'heading_font_size_pt','heading_bold_required'
+    'heading_font_size_pt','heading_bold_required','body_alignment'
 }
 
 
@@ -643,7 +862,7 @@ def _rule_display_name(rule, index):
         'margin_left_mm':'Left margin','margin_right_mm':'Right margin','margin_top_mm':'Top margin',
         'margin_bottom_mm':'Bottom margin','line_spacing':'Line spacing','min_pages':'Minimum page count',
         'max_pages':'Maximum page count','page_numbering_required':'Page numbering',
-        'body_regular_required':'Body text style'
+        'body_regular_required':'Body text style','body_alignment':'Body text alignment'
     }
     if kind=='required_section': return f'Required section: {target}'
     if kind=='section_max_words': return f'{target} maximum word count'

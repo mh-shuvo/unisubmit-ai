@@ -6,14 +6,15 @@ Inspected the downloaded v9.10 source and original release ZIP. No synced projec
 
 The latest screenshot shows successful startup and GET /health 200, followed by POST /rag/validate 502. In the inspected v9.10 endpoint, 502 is raised only when JSON decoding or its repair fails. This identifies the failing code path, but the screenshot does not contain the response body, model output, or traceback needed to identify the precise malformed output. The earlier 500 screenshot cannot establish an exact cause by itself.
 
-Confirmed code defects:
+Confirmed code defects, registered as `DEF-001` to `DEF-006` in
+[`docs/defects/README.md`](docs/defects/README.md):
 
-- Semantic validation used plain json.loads instead of the existing tolerant parser used by guideline parsing. Qwen thinking blocks, fences, or a preamble could therefore trigger unnecessary repair and 502.
-- Valid JSON with a wrong root or wrong field types could bypass parsing and crash during result processing with 500.
-- All retrieval exceptions became 500, without traceback logging.
-- Qdrant retrieval unconditionally used query_points. That API was introduced in server 1.10; the installed Python client was 1.19.1. The screenshot shows a compatibility warning, but the server version has not been verified.
-- The Core client discarded service error details and had a 240-second timeout, shorter than the AI service's 300-second generation timeout and possible second repair call.
-- Malformed source_pages values or duplicate semantic IDs could break or misassociate semantic results.
+- **DEF-001.** Semantic validation used plain json.loads instead of the existing tolerant parser used by guideline parsing. Qwen thinking blocks, fences, or a preamble could therefore trigger unnecessary repair and 502.
+- **DEF-002.** Valid JSON with a wrong root or wrong field types could bypass parsing and crash during result processing with 500.
+- **DEF-003.** All retrieval exceptions became 500, without traceback logging.
+- **DEF-004.** Qdrant retrieval unconditionally used query_points. That API was introduced in server 1.10; the installed Python client was 1.19.1. The screenshot shows a compatibility warning, but the server version has not been verified.
+- **DEF-005.** The Core client discarded service error details and had a 240-second timeout, shorter than the AI service's 300-second generation timeout and possible second repair call.
+- **DEF-006.** Malformed source_pages values or duplicate semantic IDs could break or misassociate semantic results.
 
 References: https://qdrant.tech/blog/qdrant-1.10.x/ and https://api.qdrant.tech/v-1-12-x/api-reference/search/points
 
