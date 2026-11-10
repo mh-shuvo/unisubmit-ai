@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.format_validation import (  # noqa: E402
     _find_section,
     _heading_candidates,
+    _is_body_text_line,
     _is_generic_target,
     _num_ok,
     _parse_num,
@@ -197,6 +198,141 @@ class HeadingTargetMatching(unittest.TestCase):
                          final_severity='Warning'),
                    self._info_with_heading('ABSTRACT'))
         self.assertEqual(row['status'], 'PASS')
+
+
+class HeadingAlignment(unittest.TestCase):
+    """heading_alignment must recognise left/right wording, not just centered.
+
+    _page()'s default margins (left_mm=38.1, right_mm=25.4 on a 595pt-wide
+    page) put the left margin at x=108.0pt and the right margin at x=523.0pt;
+    bboxes below are chosen relative to those two anchors, not to the page
+    edges, since that asymmetry is exactly what the alignment check must
+    account for.
+    """
+
+    @staticmethod
+    def _info_with_chapter_heading(bbox):
+        pg = _page(1)
+        pg['lines'] = [{'text': 'CHAPTER 1', 'bbox': bbox, 'font_size': 14.0}]
+        return _info([pg], text='CHAPTER 1\n')
+
+    def test_flush_left_heading_passes_flush_left_rule(self):
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
+                   self._info_with_chapter_heading((100.0, 50.0, 300.0, 64.0)))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_centered_heading_fails_flush_left_rule(self):
+        # Previously 'flush left' was not recognised at all, so a centered
+        # heading silently passed a left-alignment requirement.
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
+                   self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)))
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_right_aligned_heading_passes_right_rule(self):
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='right-aligned'),
+                   self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_right_aligned_heading_fails_flush_left_rule(self):
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
+                   self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)))
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_centered_heading_still_passes_centered_rule(self):
+        # Unchanged behaviour: the original center detection and tolerance.
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='centered'),
+                   self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_long_flush_left_heading_is_not_misread_as_centered(self):
+        # Left edge sits exactly on the 108.0pt left margin, but the line is
+        # long enough that its midpoint drifts into the page's center band.
+        # Comparing raw distance to each page edge (or to the page center)
+        # would misclassify this as centered; the margin anchor must win.
+        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
+                   self._info_with_chapter_heading((108.0, 50.0, 508.0, 64.0)))
+        self.assertEqual(row['status'], 'PASS')
+
+
+class BodyAlignment(unittest.TestCase):
+    """body_alignment must tell justified text from ragged-right text."""
+
+    @staticmethod
+    def _body_line(y, right_x, length=60):
+        return {'text': 'x' * length, 'bbox': (72.0, y, right_x, y + 14.0), 'font_size': 12.0}
+
+    def _justified_lines(self):
+        # Every line's right edge sits tight around 520pt; only the last
+        # line of the paragraph is short, as any real paragraph's is.
+        lines = [self._body_line(100 + i * 18, 520.0 + (0.5 if i % 2 else -0.5)) for i in range(8)]
+        lines.append(self._body_line(100 + 8 * 18, 300.0, length=20))
+        return lines
+
+    def _ragged_lines(self):
+        lines = [self._body_line(100 + i * 18, 400.0 + (i * 15) % 100) for i in range(8)]
+        lines.append(self._body_line(100 + 8 * 18, 250.0, length=15))
+        return lines
+
+    def _right_aligned_lines(self):
+        # Right edge tight around 520pt on every line including the last
+        # (that's what right alignment means); left edge ragged throughout.
+        lines = [{'text': 'x' * 60, 'bbox': (460.0 - (i * 15) % 100, 100 + i * 18,
+                  520.0 + (0.5 if i % 2 else -0.5), 114 + i * 18), 'font_size': 12.0}
+                 for i in range(8)]
+        lines.append({'text': 'x' * 15, 'bbox': (480.0, 100 + 8 * 18, 520.0, 114 + 8 * 18), 'font_size': 12.0})
+        return lines
+
+    def test_justified_text_passes_justified_rule(self):
+        row = _run(_rule(type='body_alignment', value='Justified'),
+                   _info([_page(1, lines=self._justified_lines())]))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_ragged_right_text_fails_justified_rule(self):
+        row = _run(_rule(type='body_alignment', value='Justified'),
+                   _info([_page(1, lines=self._ragged_lines())]))
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_ragged_right_text_passes_left_rule(self):
+        row = _run(_rule(type='body_alignment', value='Left'),
+                   _info([_page(1, lines=self._ragged_lines())]))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_no_body_text_is_not_verified(self):
+        row = _run(_rule(type='body_alignment', value='Justified'),
+                   _info([_page(1)]))
+        self.assertEqual(row['status'], 'NOT VERIFIED')
+
+    def test_unsupported_wording_is_not_verified(self):
+        row = _run(_rule(type='body_alignment', value='Diagonal'),
+                   _info([_page(1, lines=self._justified_lines())]))
+        self.assertEqual(row['status'], 'NOT VERIFIED')
+
+    def test_right_aligned_text_passes_right_rule(self):
+        row = _run(_rule(type='body_alignment', value='Right-aligned'),
+                   _info([_page(1, lines=self._right_aligned_lines())]))
+        self.assertEqual(row['status'], 'PASS')
+
+    def test_right_aligned_text_fails_justified_rule(self):
+        # Checking only the right edge cannot tell justified from
+        # right-aligned: both have flush right edges. The left edge must
+        # also be checked, or this reports PASS for text that isn't justified.
+        row = _run(_rule(type='body_alignment', value='Justified'),
+                   _info([_page(1, lines=self._right_aligned_lines())]))
+        self.assertEqual(row['status'], 'FAIL')
+
+    def test_embedded_acronym_does_not_exclude_a_body_line(self):
+        # The all-caps exclusion is whole-line ('is this heading-like text'),
+        # not per-word, so an ordinary sentence containing an acronym like
+        # AI must still count as body text.
+        line = ('Artificial Intelligence (AI) has transformed how researchers '
+                'analyze large datasets and automate repetitive tasks.')
+        self.assertTrue(_is_body_text_line(line, 12.0))
+
+    def test_fully_capitalised_line_is_excluded(self):
+        # Unlike an embedded acronym, a line that is uppercase throughout
+        # reads as a heading, not a body paragraph, and must stay excluded.
+        line = 'THE IMPACT OF AI ON MODERN RESEARCH METHODOLOGY AND PRACTICE'
+        self.assertFalse(_is_body_text_line(line, 12.0))
 
 
 class OperatorSemantics(unittest.TestCase):
@@ -460,7 +596,6 @@ class TitleCase(unittest.TestCase):
                 'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
         for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
             self.assertEqual(r['status'], 'PASS')
-            print(r['status'], '|', r['detected'])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
