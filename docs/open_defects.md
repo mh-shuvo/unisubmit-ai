@@ -1,18 +1,25 @@
 # Open defects
 
-Known defects that are understood, reproduced, and deliberately **not** fixed
-yet. Each entry carries enough detail to be picked up without re-investigating.
+Known defects that were understood and reproduced here. All entries on this
+page are now resolved; this document is kept for its original reproduction
+detail rather than rewritten, per the register's own convention that a
+superseding document keeps its starting framing. The register at
+[`defects/README.md`](defects/README.md) is the current source of truth for
+status.
 
 Fixed defects are recorded in `unsatisfiable_rules_defects_and_fixes.md` and
 `validation_defects_and_fixes.md`.
 
 Every defect and limitation now carries an identifier in the register at
 [`defects/README.md`](defects/README.md), which is the place to add a new
-finding. `OPEN-1` below is [DEF-020](defects/DEF-020.md) there.
+finding. `OPEN-1` below is [DEF-020](defects/DEF-020.md) there; the two
+"Related vocabulary gaps" this page noted alongside it (`heading_alignment`
+and `body_alignment`) are now [DEF-022](defects/DEF-022.md) and
+[LIM-007](defects/LIM-007.md) respectively.
 
 | ID | Register | Title | Severity | Blocks | Status |
 |----|----------|-------|----------|--------|--------|
-| OPEN-1 | [DEF-020](defects/DEF-020.md) | `heading_case` rejects correct title case | Mandatory rule, always fails | Restoring chapter and section numbering in submissions | Open |
+| OPEN-1 | [DEF-020](defects/DEF-020.md) | `heading_case` rejects correct title case | Mandatory rule, always fails | Restoring chapter and section numbering in submissions | **Resolved** (`a44f94f`) |
 
 ---
 
@@ -105,6 +112,12 @@ OPEN-1 is fixed; until then, restoring it would introduce one mandatory failure.
 
 ### Suggested fix
 
+**Resolved in commit `a44f94f`.** Implemented essentially as suggested below,
+with one adjustment: no explicit step was needed to "ignore a leading section
+number" — a number has no letters to capitalise, so Python's own
+`word[:1].upper()` leaves it untouched without special-casing. Full narrative
+in [`defects/DEF-020.md`](defects/DEF-020.md).
+
 Replace the `str.title()` comparison with a real title-case test:
 
 - every word must start with a capital, **except** recognised minor words
@@ -131,3 +144,14 @@ lowercase, or whose section headings are centred, is told the rule is satisfied.
 Matching `'uppercase'` and `'flush left'` to the existing branches is a few lines
 of work. `heading_case` for `Sentence Case` is also unhandled, though it happens
 to pass correctly cased third-level headings by doing nothing.
+
+**All three resolved in commits `a44f94f` and `fc2b81c`:**
+`heading_case`/`UPPERCASE` now matches alongside `'all caps'`; `heading_alignment`
+now recognises left/right wording, anchored to the page's actual margins rather
+than a naive page-edge comparison (full narrative:
+[`defects/DEF-022.md`](defects/DEF-022.md)); `body_alignment` now has a
+validator for `justified`/`left`/`right` (full narrative:
+[`defects/LIM-007.md`](defects/LIM-007.md)). `heading_case` for `Sentence Case`
+remains unhandled — out of scope for this pass, and still safe only by
+accident, the same way `UPPERCASE` was before this fix. Worth its own entry if
+picked up.
