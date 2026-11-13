@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-29 entries: 22 defects and 7 limitations. 5 open, 24 closed.
+30 entries: 23 defects and 7 limitations. 5 open, 25 closed.
 
 ---
 
@@ -62,9 +62,10 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-020](DEF-020.md) | `heading_case` rejects correct title case | defect | `nl-to-rule-translation` | Algorithm/Method | `a44f94f` | `TitleCase` |
 | [DEF-022](DEF-022.md) | `heading_alignment` only ever checked for centering | defect | `nl-to-rule-translation` | Checking | `fc2b81c` | `HeadingAlignment` |
 | [LIM-007](LIM-007.md) | `body_alignment` had no deterministic validator | limitation | `nl-to-rule-translation` | n/a | `fc2b81c` | `BodyAlignment` |
+| [DEF-023](DEF-023.md) | A dual-level guideline is blocked for every program | defect | `nl-to-rule-translation` | Checking | `4f49fc3` | `ProgramGuidelineConsistencyTests` |
 
-`DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are not
-yet described in any `CHANGELOG_v*.md`. `DEF-017` to `DEF-019` are on branch
+`DEF-007`, `DEF-016`, `DEF-017` to `DEF-019`, `LIM-001` and `DEF-023` are fixed
+but are not yet described in any `CHANGELOG_v*.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---
@@ -73,8 +74,8 @@ yet described in any `CHANGELOG_v*.md`. `DEF-017` to `DEF-019` are on branch
 
 The chapter skeleton. Each group can be written as one section.
 
-**T1 — Translating natural-language guidelines into executable rules** (6)
-[DEF-008](DEF-008.md) · [DEF-012](DEF-012.md) · [DEF-013](DEF-013.md) · [DEF-020](DEF-020.md) · [DEF-022](DEF-022.md) · [LIM-007](LIM-007.md)
+**T1 — Translating natural-language guidelines into executable rules** (7)
+[DEF-008](DEF-008.md) · [DEF-012](DEF-012.md) · [DEF-013](DEF-013.md) · [DEF-020](DEF-020.md) · [DEF-022](DEF-022.md) · [LIM-007](LIM-007.md) · [DEF-023](DEF-023.md)
 
 The guideline is written for a human, a language model turns it into a rule,
 and the engine must then accept whatever vocabulary the model chose. A
@@ -82,7 +83,9 @@ requirement is a predicate, and its number, its operator and its target were
 each lost at a different point in the pipeline. `DEF-020`, `DEF-022` and
 `LIM-007` are one more shape of the same problem: a styling concept
 (`Title Case`, `flush left`, `justified`) the guideline could state plainly,
-that the checker's own vocabulary did not yet cover.
+that the checker's own vocabulary did not yet cover. `DEF-023` is the
+fail-closed counterpart: a guideline stating it serves both degree levels,
+rejected by the very gate meant to catch wrong uploads.
 
 **T2 — Measurement validity: scope, satisfiability and normalisation** (5)
 [DEF-010](DEF-010.md) · [DEF-011](DEF-011.md) · [DEF-017](DEF-017.md) · [DEF-018](DEF-018.md) · [DEF-019](DEF-019.md)
@@ -128,11 +131,11 @@ sixteen days because nothing runs that test.
 
 Maintained by hand. Update them in the same edit that adds or closes an entry.
 
-### By class, all 29 entries
+### By class, all 30 entries
 
 | Class | Count |
 |-------|-------|
-| `nl-to-rule-translation` | 6 |
+| `nl-to-rule-translation` | 7 |
 | `observability-gap` | 5 |
 | `llm-output-contract` | 3 |
 | `scope-leakage` | 2 |
@@ -144,35 +147,35 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `fail-open` | 1 |
 | `lossy-normalisation` | 1 |
 | `dependency-api-drift` | 1 |
-| **Total** | **29** |
+| **Total** | **30** |
 
-### By ODC defect type, the 22 `DEF` entries
+### By ODC defect type, the 23 `DEF` entries
 
-Limitations carry no ODC triple, so these sum to 22 rather than 29.
+Limitations carry no ODC triple, so these sum to 23 rather than 30.
 
 | Defect type | Count |
 |-------------|-------|
 | Algorithm/Method | 10 |
-| Checking | 7 |
+| Checking | 8 |
 | Assignment/Initialisation | 2 |
 | Timing/Serialisation | 2 |
 | Interface | 1 |
-| **Total** | **22** |
+| **Total** | **23** |
 
 | Qualifier | Count |
 |-----------|-------|
 | Incorrect | 14 |
-| Missing | 8 |
+| Missing | 9 |
 | Extraneous | 0 |
 
-### By trigger, the 22 `DEF` entries
+### By trigger, the 23 `DEF` entries
 
 The trigger is also the detection method: how the defect actually surfaced.
 
 | Trigger | Count |
 |---------|-------|
 | Design Conformance | 8 |
-| Normal Mode | 4 |
+| Normal Mode | 5 |
 | Logic/Flow | 3 |
 | Workload/Stress | 2 |
 | Concurrency | 1 |
@@ -180,22 +183,22 @@ The trigger is also the detection method: how the defect actually surfaced.
 | Lateral Compatibility | 1 |
 | Complex Path | 1 |
 | Rare Situation | 1 |
-| **Total** | **22** |
+| **Total** | **23** |
 
-Worth noting when this table is quoted: 8 of 22 were found by comparing
+Worth noting when this table is quoted: 8 of 23 were found by comparing
 behaviour against the guideline's intent, and all 8 of those are in T1 and T2.
 Building a document that ought to pass found defects that examining failing
 results did not, because an unsatisfiable rule and a widely failed rule look
 identical in aggregate statistics.
 
-### By severity, all 29 entries
+### By severity, all 30 entries
 
 | Severity | Count |
 |----------|-------|
-| blocking | 13 |
+| blocking | 14 |
 | major | 12 |
 | minor | 4 |
-| **Total** | **29** |
+| **Total** | **30** |
 
 ---
 
