@@ -1808,22 +1808,42 @@ def _program_guideline_consistency(program: str, page_items: list[dict]) -> dict
         ("Master of Science", r"master\s+of\s+science"),
         ("M.Sc.", r"\bm\.?\s*sc\.?\b"),
         ("B.Sc.", r"\bb\.?\s*sc\.?\b"),
+        ("Master's", r"\bmaster(?:['’]s|s)?\b"),
+        ("Bachelor's", r"\bbachelor(?:['’]s|s)?\b"),
+        ("Doctor of Philosophy", r"doctor\s+of\s+philosophy"),
+        ("Ph.D.", r"\bph\.?\s*d\.?\b"),
+        ("Doctoral", r"\bdoctoral\b"),
     ]
     for label, pat in patterns:
         if re.search(pat, text, re.I):
             detected.append(label)
+    text_levels = {
+        "bachelor": any(x.startswith(("Bachelor", "B.Sc")) for x in detected),
+        "master": any(x.startswith(("Master", "M.Sc")) for x in detected),
+        "doctoral": any(x.startswith(("Doctor", "Ph.D")) for x in detected),
+    }
+
+    def _program_level(name: str) -> str:
+        if re.search(r"doctoral|doctor|\bph\.?\s*d\.?\b", name):
+            return "doctoral"
+        if re.search(r"master|\bm\.?\s*sc\.?\b", name):
+            return "master"
+        if re.search(r"bachelor|\bb\.?\s*sc\.?\b", name):
+            return "bachelor"
+        return ""
+
     mismatch = False
     note = ""
-    if ("m.sc" in program_low or "master" in program_low) and any(
-        x.startswith("Bachelor") or x.startswith("B.Sc") for x in detected
-    ):
+    level = _program_level(program_low)
+    # A guideline naming several levels serves them all; only a guideline
+    # whose degree statements exclude the configured level is a mismatch.
+    if level and any(text_levels.values()) and not text_levels[level]:
         mismatch = True
-        note = "Configured program appears to be a master-level program, while the guideline text contains a bachelor-level degree statement."
-    if ("b.sc" in program_low or "bachelor" in program_low) and any(
-        x.startswith("Master") or x.startswith("M.Sc") for x in detected
-    ):
-        mismatch = True
-        note = "Configured program appears to be a bachelor-level program, while the guideline text contains a master-level degree statement."
+        others = " and ".join(k for k, v in text_levels.items() if v)
+        note = (
+            f"Configured program appears to be a {level}-level program, "
+            f"while the guideline text contains only {others}-level degree statements."
+        )
     return {"mismatch": mismatch, "detected_degree_markers": detected, "note": note}
 
 
