@@ -41,6 +41,30 @@ Academic rules are not manually retyped into the application. The official guide
 ## Queue
 Every uploaded version creates an AI job. A persistent worker uses concurrency 1 and processes jobs sequentially until the queue is empty. It then stays idle and resumes when new jobs arrive. Failed jobs retry up to 3 times and do not block the rest of the queue.
 
+## Run everything with Docker (one command)
+
+The compose stack runs the web app, the AI service, Qdrant and PostgreSQL
+together:
+
+```bash
+docker compose up -d --build
+```
+
+- App: http://127.0.0.1:8000 (admin: http://127.0.0.1:8000/admin/login)
+- AI service health: http://127.0.0.1:8001/health
+- Qdrant: http://127.0.0.1:6333/dashboard
+- PostgreSQL: exposed on host port 5433 (`unisubmit`/`unisubmit`)
+
+Notes:
+- First start of the AI service downloads the `BAAI/bge-m3` embedding model
+  (~2 GB) into the `hf_cache` volume; `/health` reports when it is ready.
+- Ollama runs on the **host** (Docker on macOS cannot use the GPU), reached
+  via `host.docker.internal:11434`. Make sure `ollama serve` is running and
+  the model is pulled (`ollama pull qwen3:14b`). Point the containers at a
+  different Ollama with `DOCKER_OLLAMA_URL` in `.env`.
+- Stop everything with `docker compose down` (add `-v` to also delete the
+  database, Qdrant index and model cache).
+
 ## Run Core System
 Recommended Python: 3.13
 
