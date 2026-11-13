@@ -64,8 +64,9 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [LIM-007](LIM-007.md) | `body_alignment` had no deterministic validator | limitation | `nl-to-rule-translation` | n/a | `fc2b81c` | `BodyAlignment` |
 | [DEF-023](DEF-023.md) | A dual-level guideline is blocked for every program | defect | `nl-to-rule-translation` | Checking | `4f49fc3` | `ProgramGuidelineConsistencyTests` |
 
-`DEF-007`, `DEF-016`, `DEF-017` to `DEF-019`, `LIM-001` and `DEF-023` are fixed
-but are not yet described in any `CHANGELOG_v*.md`. `DEF-017` to `DEF-019` are on branch
+`DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are
+not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
+`CHANGELOG_v9_13.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---
