@@ -93,6 +93,11 @@ This axis is specific to this project. The classes were derived after the fact
 from the defects actually found, not chosen in advance from a published list,
 which is the point of having a secondary axis as well.
 
+The last five classes, and themes `T7` and `T8`, were added on 2026-11-14 when
+the architecture review for the production restructuring plan found defects
+outside the validation pipeline (`DEF-024` to `DEF-045`) that none of the
+original twelve classes described.
+
 | Class | Meaning |
 |-------|---------|
 | `nl-to-rule-translation` | Human guideline text was turned into a formal rule incorrectly: a value, an operator, or a target name lost its meaning on the way in |
@@ -107,6 +112,11 @@ which is the point of having a secondary axis as well.
 | `resource-contention` | A shared serial dependency was saturated by a second caller |
 | `dependency-api-drift` | A library or server API was used without regard to the version actually installed |
 | `observability-gap` | The failure was invisible, unattributable, or not replayable afterwards |
+| `event-loop-blocking` | Synchronous or CPU-bound work ran on an `asyncio` event loop, so unrelated requests on the same loop waited for it |
+| `job-coordination` | A unit of work (an upload, a queue job) was claimed, numbered or released without coordination between callers or across a restart, so it was duplicated or abandoned |
+| `insecure-default` | A security control was missing, or defaulted to the unsafe value, so the system ran insecurely without anyone choosing to |
+| `schema-drift` | The ORM models and the database schema disagree, because nothing carries a model change to an existing database |
+| `runtime-environment` | Behaviour depends on where the code runs (host, container, OS) rather than on the code path: hardware the environment hides, or paths and addresses valid in only one environment |
 
 Choose exactly one class, the one that describes the **cause**, not the symptom.
 A context overflow that produced unparseable output is `llm-context-budget`, not
@@ -163,6 +173,11 @@ have been found:
 | `resource-contention` | `Timing/Serialisation` |
 | `dependency-api-drift` | `Interface` |
 | `observability-gap` | `Checking` or `Function` |
+| `event-loop-blocking` | `Timing/Serialisation` |
+| `job-coordination` | `Timing/Serialisation` or `Function` |
+| `insecure-default` | `Assignment/Initialisation`, `Function` or `Checking` |
+| `schema-drift` | `Function`, qualifier `Missing` |
+| `runtime-environment` | `Assignment/Initialisation` |
 
 The table is guidance, not a constraint. Where an entry departs from it, the
 entry says why.
@@ -182,6 +197,8 @@ can be written from one theme's group of entries without rereading the rest.
 | `T4` | Operating a local LLM: context budget and output contract |
 | `T5` | Integration brittleness: configuration, timeouts, dependency drift and contention |
 | `T6` | Observability and reproducibility |
+| `T7` | Concurrency and job lifecycle: the event loop, queue claims and uploads |
+| `T8` | Deployment readiness: secure defaults, isolation and schema lifecycle |
 
 ---
 
