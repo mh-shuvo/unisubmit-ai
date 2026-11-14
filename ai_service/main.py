@@ -1,8 +1,10 @@
 import os
 import sys
+import hmac
 import json
 import asyncio
 import logging
+import threading
 from functools import wraps
 from importlib.metadata import version as package_version
 import re
@@ -15,7 +17,7 @@ from urllib.parse import quote
 import httpx
 import fitz  # PyMuPDF
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import Depends, FastAPI, UploadFile, File, Form, HTTPException, Request
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, ScoredPoint
@@ -25,11 +27,36 @@ load_dotenv()
 APP_VERSION = "0.6.9-v9.10.2-guideline-chunks"
 logger = logging.getLogger("uvicorn.error")
 
-app = FastAPI(title="UniSubmit AI Service", version=APP_VERSION)
+# Shared with the web app; every route except the liveness probes requires it
+# (DEF-029). Unset or short means the service refuses to start.
+AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN") or None
+MIN_TOKEN_LENGTH = 32
+OPEN_PATHS = {"/", "/health"}
+
+
+async def require_service_token(request: Request) -> None:
+    if request.url.path in OPEN_PATHS:
+        return
+    if not AI_SERVICE_TOKEN:
+        raise HTTPException(status_code=503, detail="AI_SERVICE_TOKEN is not configured.")
+    supplied = request.headers.get("authorization", "")
+    expected = f"Bearer {AI_SERVICE_TOKEN}"
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Missing or invalid service token.")
+
+
+app = FastAPI(
+    title="UniSubmit AI Service",
+    version=APP_VERSION,
+    dependencies=[Depends(require_service_token)],
+)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 DEFAULT_LLM_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:32b")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+# Unset lets FlagEmbedding choose: CUDA, then Apple MPS, then CPU. Docker on
+# macOS sees no GPU, which is why the Mac demo runs this service natively (LIM-008).
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE") or None
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 
 VECTOR_SIZE = 1024
@@ -54,6 +81,8 @@ OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "900"))
 embedding_model = None
 embedding_status = "not_loaded"
 embedding_error = None
+# Encoding runs in worker threads (DEF-033); one encode at a time.
+embedding_lock = threading.Lock()
 
 qdrant_client = None
 qdrant_status = "not_loaded"
@@ -115,6 +144,14 @@ def _check_qdrant_sync() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def embedding_device() -> Optional[str]:
+    """The device the embedding model actually runs on, as FlagEmbedding resolved it."""
+    if embedding_model is None:
+        return EMBEDDING_DEVICE
+    devices = getattr(embedding_model, "target_devices", None) or [EMBEDDING_DEVICE]
+    return ", ".join(str(d) for d in devices if d) or None
+
+
 def _check_embedding_sync() -> tuple[bool, str]:
     """Load the embedding model (heavy — runs once at startup)."""
     global embedding_model, embedding_status, embedding_error
@@ -122,10 +159,12 @@ def _check_embedding_sync() -> tuple[bool, str]:
         from FlagEmbedding import BGEM3FlagModel
 
         embedding_status = "loading"
-        embedding_model = BGEM3FlagModel(EMBEDDING_MODEL_NAME, use_fp16=True)
+        embedding_model = BGEM3FlagModel(
+            EMBEDDING_MODEL_NAME, use_fp16=True, devices=EMBEDDING_DEVICE
+        )
         embedding_status = "ready"
         embedding_error = None
-        return True, f"model='{EMBEDDING_MODEL_NAME}'"
+        return True, f"model='{EMBEDDING_MODEL_NAME}'  device={embedding_device()}"
     except Exception as exc:
         embedding_status = "error"
         embedding_error = str(exc)
@@ -141,6 +180,16 @@ async def startup_event():
     logger.info(SEP)
 
     failures: list[str] = []
+
+    # 0. Service token (CRITICAL): without it every protected route answers 503.
+    token_ok = bool(AI_SERVICE_TOKEN) and len(AI_SERVICE_TOKEN) >= MIN_TOKEN_LENGTH
+    _preflight_banner(
+        "Service token",
+        token_ok,
+        "set" if token_ok else f"AI_SERVICE_TOKEN must be at least {MIN_TOKEN_LENGTH} characters",
+    )
+    if not token_ok:
+        failures.append("AI_SERVICE_TOKEN is missing or too short")
 
     # 1. Ollama server + model (CRITICAL)
     ollama_ok, ollama_detail = await _check_ollama()
@@ -192,7 +241,12 @@ class EmbeddingRequest(BaseModel):
     texts: list[str]
 
 
+# Callers name the collection explicitly, by template version id (DEF-032).
+COLLECTION_PATTERN = r"^[A-Za-z0-9_]{1,128}$"
+
+
 class SearchRequest(BaseModel):
+    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -202,6 +256,7 @@ class SearchRequest(BaseModel):
 
 
 class ValidateRAGRequest(BaseModel):
+    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -231,6 +286,11 @@ def make_collection_name(
     submission_type: str,
     template_version: str,
 ) -> str:
+    """Legacy naming, kept for collections indexed before DEF-032.
+
+    Display names are not unique and slugify alike ("M.Sc. (CSE)" and
+    "M.Sc. CSE"), so two guidelines could share, and overwrite, one collection.
+    """
     return "_".join(
         [
             slugify(department),
@@ -239,6 +299,20 @@ def make_collection_name(
             slugify(template_version),
         ]
     )
+
+
+def resolve_collection(
+    collection: Optional[str],
+    department: str,
+    program: str,
+    submission_type: str,
+    template_version: str,
+) -> str:
+    if collection is None:
+        return make_collection_name(department, program, submission_type, template_version)
+    if not re.fullmatch(COLLECTION_PATTERN, collection):
+        raise HTTPException(status_code=422, detail="Invalid collection name.")
+    return collection
 
 
 def extract_pdf_pages(pdf_path: str) -> list[dict]:
@@ -292,7 +366,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     if embedding_model is None or embedding_status != "ready":
         raise RuntimeError(f"Embedding model unavailable: {embedding_error}")
 
-    result = embedding_model.encode(texts, batch_size=4, max_length=1024)
+    with embedding_lock:
+        result = embedding_model.encode(texts, batch_size=4, max_length=1024)
 
     return result["dense_vecs"].tolist()
 
@@ -501,6 +576,7 @@ async def health():
         },
         "embedding": {
             "model": EMBEDDING_MODEL_NAME,
+            "device": embedding_device(),
             "status": embedding_status,
             "error": embedding_error,
         },
@@ -516,7 +592,7 @@ async def health():
 @app.post("/embed")
 async def embed(request: EmbeddingRequest):
     try:
-        vectors = embed_texts(request.texts)
+        vectors = await asyncio.to_thread(embed_texts, request.texts)
 
         return {
             "status": "success",
@@ -542,7 +618,7 @@ async def rag_collections():
             status_code=503, detail=f"Qdrant unavailable: {qdrant_error}"
         )
 
-    result = qdrant_client.get_collections()
+    result = await asyncio.to_thread(qdrant_client.get_collections)
 
     return {
         "status": "success",
@@ -557,7 +633,7 @@ async def delete_rag_collection(collection_name: str):
         raise HTTPException(status_code=503, detail="Qdrant is not ready.")
 
     try:
-        qdrant_client.delete_collection(collection_name)
+        await asyncio.to_thread(qdrant_client.delete_collection, collection_name)
 
         return {"status": "success", "deleted": collection_name}
 
@@ -577,6 +653,7 @@ async def index_template(
     submission_type: str = Form(...),
     template_version: str = Form(...),
     recreate: bool = Form(True),
+    collection: Optional[str] = Form(None),
     pdf: UploadFile = File(...),
 ):
     if not pdf.filename.lower().endswith(".pdf"):
@@ -584,8 +661,8 @@ async def index_template(
             status_code=400, detail="Only PDF template files are accepted."
         )
 
-    collection_name = make_collection_name(
-        department, program, submission_type, template_version
+    collection_name = resolve_collection(
+        collection, department, program, submission_type, template_version
     )
 
     temp_path = None
@@ -597,7 +674,7 @@ async def index_template(
             temp.write(await pdf.read())
             temp_path = temp.name
 
-        pages = extract_pdf_pages(temp_path)
+        pages = await asyncio.to_thread(extract_pdf_pages, temp_path)
 
         if not pages:
             raise HTTPException(
@@ -608,7 +685,7 @@ async def index_template(
                 ),
             )
 
-        ensure_collection(collection_name, recreate=recreate)
+        await asyncio.to_thread(ensure_collection, collection_name, recreate)
 
         payloads = []
 
@@ -636,7 +713,7 @@ async def index_template(
             )
 
         texts = [p["text"] for p in payloads]
-        vectors = embed_texts(texts)
+        vectors = await asyncio.to_thread(embed_texts, texts)
 
         points = []
 
@@ -648,7 +725,8 @@ async def index_template(
         batch_size = 64
 
         for i in range(0, len(points), batch_size):
-            qdrant_client.upsert(
+            await asyncio.to_thread(
+                qdrant_client.upsert,
                 collection_name=collection_name,
                 points=points[i : i + batch_size],
                 wait=True,
@@ -679,7 +757,8 @@ async def index_template(
 
 @app.post("/rag/search")
 async def rag_search(request: SearchRequest):
-    collection_name = make_collection_name(
+    collection_name = resolve_collection(
+        request.collection,
         request.department,
         request.program,
         request.submission_type,
@@ -687,7 +766,9 @@ async def rag_search(request: SearchRequest):
     )
 
     try:
-        hits = retrieve_chunks(collection_name, request.query, request.limit)
+        hits = await asyncio.to_thread(
+            retrieve_chunks, collection_name, request.query, request.limit
+        )
 
         return {
             "status": "success",
@@ -860,7 +941,8 @@ def _log_validation_errors(func):
 @app.post("/rag/validate")
 @_log_validation_errors
 async def rag_validate(request: ValidateRAGRequest):
-    collection_name = make_collection_name(
+    collection_name = resolve_collection(
+        request.collection,
         request.department,
         request.program,
         request.submission_type,
@@ -918,10 +1000,17 @@ async def rag_validate(request: ValidateRAGRequest):
         else:
             req.pop("student_section_text", None)
     try:
-        hits = retrieve_chunks(collection_name, request.query, request.limit)
+        # Embedding and Qdrant are blocking calls; on the event loop they froze
+        # every other request, /health included (DEF-033).
+        hits = await asyncio.to_thread(
+            retrieve_chunks, collection_name, request.query, request.limit
+        )
         seen = {(h.get("page"), h.get("text")) for h in hits}
         for req in explicit[:40]:
-            for h in retrieve_chunks(collection_name, req["requirement"], 3):
+            more = await asyncio.to_thread(
+                retrieve_chunks, collection_name, req["requirement"], 3
+            )
+            for h in more:
                 k = (h.get("page"), h.get("text"))
                 if k not in seen:
                     seen.add(k)
@@ -1149,6 +1238,7 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
 # Explicit formatting profile extraction
 # -----------------------------
 class FormatProfileRequest(BaseModel):
+    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -1808,22 +1898,42 @@ def _program_guideline_consistency(program: str, page_items: list[dict]) -> dict
         ("Master of Science", r"master\s+of\s+science"),
         ("M.Sc.", r"\bm\.?\s*sc\.?\b"),
         ("B.Sc.", r"\bb\.?\s*sc\.?\b"),
+        ("Master's", r"\bmaster(?:['’]s|s)?\b"),
+        ("Bachelor's", r"\bbachelor(?:['’]s|s)?\b"),
+        ("Doctor of Philosophy", r"doctor\s+of\s+philosophy"),
+        ("Ph.D.", r"\bph\.?\s*d\.?\b"),
+        ("Doctoral", r"\bdoctoral\b"),
     ]
     for label, pat in patterns:
         if re.search(pat, text, re.I):
             detected.append(label)
+    text_levels = {
+        "bachelor": any(x.startswith(("Bachelor", "B.Sc")) for x in detected),
+        "master": any(x.startswith(("Master", "M.Sc")) for x in detected),
+        "doctoral": any(x.startswith(("Doctor", "Ph.D")) for x in detected),
+    }
+
+    def _program_level(name: str) -> str:
+        if re.search(r"doctoral|doctor|\bph\.?\s*d\.?\b", name):
+            return "doctoral"
+        if re.search(r"master|\bm\.?\s*sc\.?\b", name):
+            return "master"
+        if re.search(r"bachelor|\bb\.?\s*sc\.?\b", name):
+            return "bachelor"
+        return ""
+
     mismatch = False
     note = ""
-    if ("m.sc" in program_low or "master" in program_low) and any(
-        x.startswith("Bachelor") or x.startswith("B.Sc") for x in detected
-    ):
+    level = _program_level(program_low)
+    # A guideline naming several levels serves them all; only a guideline
+    # whose degree statements exclude the configured level is a mismatch.
+    if level and any(text_levels.values()) and not text_levels[level]:
         mismatch = True
-        note = "Configured program appears to be a master-level program, while the guideline text contains a bachelor-level degree statement."
-    if ("b.sc" in program_low or "bachelor" in program_low) and any(
-        x.startswith("Master") or x.startswith("M.Sc") for x in detected
-    ):
-        mismatch = True
-        note = "Configured program appears to be a bachelor-level program, while the guideline text contains a master-level degree statement."
+        others = " and ".join(k for k, v in text_levels.items() if v)
+        note = (
+            f"Configured program appears to be a {level}-level program, "
+            f"while the guideline text contains only {others}-level degree statements."
+        )
     return {"mismatch": mismatch, "detected_degree_markers": detected, "note": note}
 
 
@@ -2089,7 +2199,8 @@ APPROVED GUIDELINE TEXT:
 
 @app.post("/format/profile")
 async def extract_format_profile(request: FormatProfileRequest):
-    collection_name = make_collection_name(
+    collection_name = resolve_collection(
+        request.collection,
         request.department,
         request.program,
         request.submission_type,
@@ -2104,7 +2215,9 @@ async def extract_format_profile(request: FormatProfileRequest):
     seen = set()
     for q in queries:
         try:
-            for h in retrieve_chunks(collection_name, q, request.limit):
+            for h in await asyncio.to_thread(
+                retrieve_chunks, collection_name, q, request.limit
+            ):
                 key = (h.get("page"), h.get("text"))
                 if key not in seen:
                     seen.add(key)

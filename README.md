@@ -39,9 +39,58 @@ Restricted to the assigned academic unit:
 Academic rules are not manually retyped into the application. The official guideline PDF is indexed by the AI service and used as the primary validation source. An optional Additional Rules PDF can be indexed into the same program/version RAG collection. Admins can still add special explicit restrictions such as searchable PDF, file-size limit or minimum pages.
 
 ## Queue
-Every uploaded version creates an AI job. A persistent worker uses concurrency 1 and processes jobs sequentially until the queue is empty. It then stays idle and resumes when new jobs arrive. Failed jobs retry up to 3 times and do not block the rest of the queue.
+Every uploaded version creates an AI job. A separate worker process,
+`python -m app.worker`, takes one job at a time until the queue is empty, then
+waits for new jobs. It never runs inside the web server, so pages stay
+responsive while a thesis is validated. Failed jobs retry up to 3 times and do
+not block the rest of the queue. A job left running by a worker that stopped is
+put back in the queue.
 
-## Run Core System
+## Secrets
+Nothing has a default secret. Set these in `.env` before the first start, each
+generated with `openssl rand -hex 32`:
+
+| Variable | Used by |
+|---|---|
+| `APP_SECRET` | web app and worker: signs session cookies |
+| `AI_SERVICE_TOKEN` | web app, worker and AI service: every AI call needs it |
+| `POSTGRES_PASSWORD` | PostgreSQL in Docker (an existing volume keeps the password it was created with) |
+
+The AI service reads `ai_service/.env` when run natively, so `AI_SERVICE_TOKEN`
+goes there as well. Qdrant needs no key: the AI service connects to it by URL
+(`QDRANT_URL`), and its port is bound to `127.0.0.1`.
+
+## Run with Docker
+
+```bash
+docker compose up -d --build
+```
+
+This starts the web app, the queue worker, Qdrant and PostgreSQL. On an Apple
+Silicon Mac, Ollama and the AI service run natively so they can use the GPU:
+see [`docs/runbook-demo-mac.md`](docs/runbook-demo-mac.md). On a Linux host,
+run the AI service in Docker too:
+
+```bash
+DOCKER_AI_SERVICE_URL=http://ai-service:8001 docker compose --profile ai up -d --build
+```
+
+- App: http://127.0.0.1:8000 (admin: http://127.0.0.1:8000/admin/login)
+- Qdrant: http://127.0.0.1:6333/dashboard
+- PostgreSQL: host port 5433, user `unisubmit`, password from `POSTGRES_PASSWORD`
+
+Every port is bound to `127.0.0.1`, so nothing is reachable from another
+machine. Create the first Super Admin once:
+
+```bash
+docker compose exec app python -m app.seed super-admin --email you@example.edu
+```
+
+Add `python -m app.seed demo-data` for the sample faculty, programs and
+supervisors. Stop everything with `docker compose down` (add `-v` to also
+delete the database, Qdrant index and model cache).
+
+## Run Core System natively
 Recommended Python: 3.13
 
 ```bat
@@ -49,17 +98,18 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
+python -m app.seed super-admin --email you@example.edu
 uvicorn app.main:app --reload --port 8000
+python -m app.worker
 ```
+
+The web server and the worker are two processes; run each in its own terminal.
 
 Public portal: http://127.0.0.1:8000
 Admin login: http://127.0.0.1:8000/admin/login
 
-Demo Super Admin:
-- Email: `admin@unisubmit.local`
-- Password: `Admin@123`
-
-Change the demo password before any real deployment.
+There is no built-in admin account. `python -m app.seed super-admin` asks for a
+password of at least 12 characters.
 
 ## Run Isolated AI Service
 The AI service is in `ai_service/` and is separate from the core system.
@@ -75,14 +125,17 @@ cd ai_service
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --port 8001
+uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-AI health: http://127.0.0.1:8001/health
-AI docs: http://127.0.0.1:8001/docs
+AI health: http://127.0.0.1:8001/health (open; every other route needs the
+`AI_SERVICE_TOKEN` as `Authorization: Bearer <token>`).
+The embedding model uses the GPU when one is visible (CUDA, or Apple MPS when
+run natively on a Mac); `/health` reports the device. Set `EMBEDDING_DEVICE`
+to override.
 
 ## Development note
-SQLite and the in-process persistent queue are suitable for an MVP / single-server deployment. For larger production deployment, keep the same workflow but move PostgreSQL + Redis/Celery (concurrency 1 or higher) behind the service.
+SQLite and the database-backed queue are suitable for an MVP / single-server deployment. For larger production deployment, keep the same workflow and move to PostgreSQL with more worker processes.
 
 
 ## v9 guideline-first rule parsing and validation

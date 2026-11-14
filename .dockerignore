@@ -1,0 +1,20 @@
+# Root image only needs app/ + requirements.txt; the AI service has its own
+# build context under ai_service/.
+.git/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+ai_service/
+docs/
+tests/
+tools/
+storage/
+*.db
+*.db-shm
+*.db-wal
+CHANGELOG_*.md
+*.md
+test_job.py
+docker-compose.yml

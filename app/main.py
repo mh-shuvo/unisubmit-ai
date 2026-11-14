@@ -1,15 +1,16 @@
-import asyncio, json, shutil, uuid
+import json, shutil, uuid
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
-from .db import Base, engine, get_db, SessionLocal
+from .db import Base, engine, get_db
 from .models import (
     Faculty,
     Institute,
@@ -40,7 +41,6 @@ from .ai_service_client import (
 from .reporting import build_validation_report
 from .report_parser import parse_ai_report, inline_markdown_html
 from .emailer import send_submission_email
-from .seed import seed
 from .config import settings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,23 +63,11 @@ templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
 templates.env.globals["default_llm_model"] = settings.ollama_model
 
-worker_task = None
-
-
 @app.on_event("startup")
-async def startup():
-    global worker_task
+def startup():
+    # Validation jobs run in a separate process, `python -m app.worker` (DEF-024).
+    # Accounts and demo data come from `python -m app.seed` (DEF-028).
     Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-    seed(db)
-    db.close()
-    worker_task = asyncio.create_task(queue_worker())
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    if worker_task:
-        worker_task.cancel()
 
 
 # ---------- helpers ----------
@@ -695,9 +683,9 @@ def create_unit_admin(
 
 
 @app.get("/admin/ai", response_class=HTMLResponse)
-async def super_ai(request: Request, db: Session = Depends(get_db)):
+def super_ai(request: Request, db: Session = Depends(get_db)):
     u = require_super(request, db)
-    status = await ai_health(settings.ai_service_url)
+    status = ai_health(settings.ai_service_url)
     profiles = db.query(AIProfile).all()
     return templates.TemplateResponse(
         "super_ai.html",
@@ -856,7 +844,7 @@ def add_configuration(
 
 
 @app.post("/admin/configuration/{template_id}/version")
-async def add_version(
+def add_version(
     request: Request,
     template_id: int,
     version: str = Form(...),
@@ -959,9 +947,17 @@ def template_version_page(
     )
 
 
+async def _form_data(request: Request) -> FormData:
+    """Lets a plain `def` route read a form whose field names are dynamic."""
+    return await request.form()
+
+
 @app.post("/admin/template-version/{version_id}/review-rules")
-async def review_guideline_rules(
-    version_id: int, request: Request, db: Session = Depends(get_db)
+def review_guideline_rules(
+    version_id: int,
+    request: Request,
+    form: FormData = Depends(_form_data),
+    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
@@ -980,7 +976,6 @@ async def review_guideline_rules(
             303,
         )
     profile = _normalize_profile_severities(profile)
-    form = await request.form()
     allowed = {"Mandatory", "Warning", "Recommendation", "Ignore"}
     changes = []
     for prefix, key in [
@@ -1326,7 +1321,7 @@ async def index_guideline(
         "base_model": profile.base_model,
     }
     parsed_profile = await parse_guideline_profile(
-        profile.service_url, parse_fields, tv.pdf_path
+        settings.ai_service_url, parse_fields, tv.pdf_path
     )
     if parsed_profile.get("status") != "success":
         tv.format_profile_json = "{}"
@@ -1375,6 +1370,8 @@ async def index_guideline(
         "program": p.name,
         "submission_type": tv.template.submission_type,
         "template_version": tv.version,
+        # Named by id: display names are not unique and slugify alike (DEF-032).
+        "collection": f"tv_{tv.id}",
         "recreate": "true",
     }
     result = await index_template(settings.ai_service_url, fields, tv.pdf_path)
@@ -1500,7 +1497,7 @@ def submit_form(request: Request, db: Session = Depends(get_db)):
 
 
 @app.post("/submit")
-async def submit(
+def submit(
     request: Request,
     title: str = Form(...),
     program_id: int = Form(...),
@@ -1546,12 +1543,12 @@ async def submit(
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    await save_queue_version(sub, pdf, db)
+    save_queue_version(sub, pdf, db)
     return RedirectResponse(f"/submission/{sub.id}", 303)
 
 
 @app.post("/submission/{submission_id}/resubmit")
-async def resubmit(
+def resubmit(
     submission_id: int,
     request: Request,
     pdf: UploadFile = File(...),
@@ -1561,14 +1558,49 @@ async def resubmit(
     sub = db.get(Submission, submission_id)
     if not sub or sub.student_user_id != s.id:
         raise HTTPException(404)
-    await save_queue_version(sub, pdf, db)
+    if save_queue_version(sub, pdf, db) is None:
+        return RedirectResponse(
+            flash_url(
+                f"/submission/{sub.id}",
+                error="This submission is still being validated. Upload a revised version after the result is ready.",
+            ),
+            303,
+        )
     return RedirectResponse(f"/submission/{sub.id}", 303)
 
 
-async def save_queue_version(sub, pdf, db):
+ACTIVE_JOB_STATUSES = ("QUEUED", "RETRYING", "PROCESSING")
+
+
+def save_queue_version(sub, pdf, db):
+    """Store an uploaded PDF as the next version and queue it.
+
+    Returns None, storing nothing, while an earlier version is still queued or
+    running: a double-click must not number two uploads alike or queue a second
+    GPU job (DEF-026).
+    """
     if not pdf.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are allowed")
-    version_no = len(sub.versions) + 1
+    # Concurrent uploads for this submission wait here, one at a time.
+    db.query(Submission).filter(Submission.id == sub.id).with_for_update().one()
+    active = (
+        db.query(AIJob.id)
+        .join(SubmissionVersion, AIJob.submission_version_id == SubmissionVersion.id)
+        .filter(
+            SubmissionVersion.submission_id == sub.id,
+            AIJob.status.in_(ACTIVE_JOB_STATUSES),
+        )
+        .first()
+    )
+    if active:
+        db.rollback()
+        return None
+    version_no = (
+        db.query(func.max(SubmissionVersion.version_no))
+        .filter(SubmissionVersion.submission_id == sub.id)
+        .scalar()
+        or 0
+    ) + 1
     dest = (
         SUBMISSION_STORE
         / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
@@ -1593,6 +1625,7 @@ async def save_queue_version(sub, pdf, db):
     db.refresh(sv)
     db.add(AIJob(submission_version_id=sv.id, status="QUEUED"))
     db.commit()
+    return sv
 
 
 @app.get("/submission/{submission_id}", response_class=HTMLResponse)
@@ -1609,7 +1642,14 @@ def view_submission(
     ]
     return templates.TemplateResponse(
         "submission.html",
-        {"request": request, "student": s, "sub": sub, "versions": versions},
+        {
+            "request": request,
+            "student": s,
+            "sub": sub,
+            "versions": versions,
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
     )
 
 
@@ -1747,48 +1787,30 @@ def download_report_bound(
     )
 
 
-# ---------- sequential persistent worker ----------
-async def queue_worker():
-    while True:
-        try:
-            db = SessionLocal()
-            job = (
-                db.query(AIJob)
-                .filter(AIJob.status.in_(["QUEUED", "RETRYING"]))
-                .order_by(AIJob.priority.asc(), AIJob.created_at.asc())
-                .first()
-            )
-            if not job:
-                db.close()
-                await asyncio.sleep(2)
-                continue
-            job.status = "PROCESSING"
-            job.started_at = datetime.utcnow()
-            job.attempt_count += 1
-            db.commit()
-            try:
-                await process_job(db, job)
-                job.status = "COMPLETED"
-                job.completed_at = datetime.utcnow()
-                job.error_message = ""
-                db.commit()
-            except Exception as e:
-                job.error_message = str(e)
-                job.status = "RETRYING" if job.attempt_count < 3 else "FAILED"
-                if job.status == "FAILED":
-                    job.completed_at = datetime.utcnow()
-                    job.submission_version.status = "Validation Failed"
-                    job.submission_version.submission.status = "Validation Failed"
-                db.commit()
-            db.close()
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            try:
-                db.close()
-            except:
-                pass
-            await asyncio.sleep(3)
+# ---------- validation job (run by app/worker.py) ----------
+def semantic_validation_payload(program, tv, fmt_profile, student_text, base_model):
+    """The /rag/validate request for one document; tools/measure_validation.py sends the same."""
+    return {
+        "department": program.unit_name,
+        "program": program.name,
+        "submission_type": tv.template.submission_type,
+        "template_version": tv.version,
+        "student_text": student_text[:30000],
+        "query": "Evaluate this submitted document against all relevant requirements in the approved guideline and additional rules.",
+        "base_model": base_model,
+        # The collection indexing actually created (DEF-032).
+        "collection": tv.rag_collection or None,
+        "limit": 10,
+        "explicit_requirements": (
+            [
+                r
+                for r in fmt_profile.get("semantic_requirements", [])
+                if r.get("enabled", True) and r.get("final_severity") != "Ignore"
+            ]
+            if isinstance(fmt_profile, dict) and tv.format_profile_status == "Active"
+            else []
+        ),
+    }
 
 
 async def process_job(db, job):
@@ -1818,27 +1840,12 @@ async def process_job(db, job):
     ai_ref = ""
     final_status = "REVISION REQUIRED" if format_failed else det_status
     if sub.ai_profile and tv.rag_status == "Indexed":
-        payload = {
-            "department": sub.program.unit_name,
-            "program": sub.program.name,
-            "submission_type": tv.template.submission_type,
-            "template_version": tv.version,
-            "student_text": info["text"][:30000],
-            "query": "Evaluate this submitted document against all relevant requirements in the approved guideline and additional rules.",
-            "base_model": sub.ai_profile.base_model,
-            "limit": 10,
-            "explicit_requirements": (
-                [
-                    r
-                    for r in fmt_profile.get("semantic_requirements", [])
-                    if r.get("enabled", True) and r.get("final_severity") != "Ignore"
-                ]
-                if isinstance(fmt_profile, dict)
-                and tv.format_profile_status == "Active"
-                else []
-            ),
-        }
-        ai = await rag_validate(sub.ai_profile.service_url, payload)
+        payload = semantic_validation_payload(
+            sub.program, tv, fmt_profile, info["text"], sub.ai_profile.base_model
+        )
+        # One AI service per installation: a URL stored on an old profile row
+        # must not override the configured one (DEF-035).
+        ai = await rag_validate(settings.ai_service_url, payload)
         if not ai:
             raise RuntimeError("AI service unavailable or RAG validation failed")
         ai_text = ai.get("response", "")

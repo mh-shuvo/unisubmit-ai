@@ -2,6 +2,8 @@ import logging
 import os
 import httpx
 
+from .config import settings
+
 logger = logging.getLogger("uvicorn.error")
 
 # Semantic validation runs one local-LLM call per batch of rules, so the budget
@@ -9,10 +11,16 @@ logger = logging.getLogger("uvicorn.error")
 RAG_VALIDATE_TIMEOUT = float(os.getenv("RAG_VALIDATE_TIMEOUT", "1800"))
 
 
-async def health(service_url: str) -> dict:
+def _auth() -> dict:
+    """The AI service rejects calls without the shared token (DEF-029)."""
+    return {"Authorization": f"Bearer {settings.ai_service_token}"}
+
+
+def health(service_url: str) -> dict:
+    """Synchronous so the admin page can call it from a plain `def` route (DEF-025)."""
     try:
-        async with httpx.AsyncClient(timeout=4) as c:
-            r = await c.get(service_url.rstrip("/") + "/health")
+        with httpx.Client(timeout=4, headers=_auth()) as c:
+            r = c.get(service_url.rstrip("/") + "/health")
             r.raise_for_status()
             return {"online": True, "data": r.json()}
     except Exception as e:
@@ -21,7 +29,7 @@ async def health(service_url: str) -> dict:
 
 async def rag_validate(service_url: str, payload: dict):
     try:
-        async with httpx.AsyncClient(timeout=RAG_VALIDATE_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=RAG_VALIDATE_TIMEOUT, headers=_auth()) as c:
             r = await c.post(service_url.rstrip("/") + "/rag/validate", json=payload)
             r.raise_for_status()
             return r.json()
@@ -43,7 +51,7 @@ async def rag_validate(service_url: str, payload: dict):
 
 async def index_template(service_url: str, fields: dict, pdf_path: str):
     try:
-        async with httpx.AsyncClient(timeout=300) as c:
+        async with httpx.AsyncClient(timeout=300, headers=_auth()) as c:
             with open(pdf_path, "rb") as f:
                 r = await c.post(
                     service_url.rstrip("/") + "/rag/index-template",
@@ -58,7 +66,7 @@ async def index_template(service_url: str, fields: dict, pdf_path: str):
 
 async def extract_format_profile(service_url: str, payload: dict):
     try:
-        async with httpx.AsyncClient(timeout=300) as c:
+        async with httpx.AsyncClient(timeout=300, headers=_auth()) as c:
             r = await c.post(service_url.rstrip("/") + "/format/profile", json=payload)
             r.raise_for_status()
             return r.json()
@@ -68,7 +76,7 @@ async def extract_format_profile(service_url: str, payload: dict):
 
 async def parse_guideline_profile(service_url: str, fields: dict, pdf_path: str):
     try:
-        async with httpx.AsyncClient(timeout=1500) as c:
+        async with httpx.AsyncClient(timeout=1500, headers=_auth()) as c:
             with open(pdf_path, "rb") as f:
                 r = await c.post(
                     service_url.rstrip("/") + "/guideline/profile",

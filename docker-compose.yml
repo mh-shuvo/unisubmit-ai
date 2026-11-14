@@ -1,12 +1,112 @@
+# UniSubmit stack: web app + queue worker + Qdrant + Postgres in Docker.
+#
+#   docker compose up -d --build                 # Mac demo: AI service runs natively
+#   docker compose --profile ai up -d --build    # AI service in Docker too (CPU only)
+#
+# On an Apple Silicon Mac, Docker cannot reach the GPU, so Ollama and the AI
+# service run natively and the containers reach them via host.docker.internal
+# (see docs/runbook-demo-mac.md). On a Linux host, use the `ai` profile and set
+# DOCKER_AI_SERVICE_URL=http://ai-service:8001.
+#
+# Every published port is bound to 127.0.0.1, so nothing is reachable from
+# another machine (DEF-030). Secrets have no defaults: compose refuses to start
+# until they are set in .env (DEF-027, DEF-030).
+
+x-app: &app
+  build: .
+  volumes:
+    # Named volume so it works regardless of Docker Desktop file-sharing
+    # settings. Swap for `./storage:/app/storage` to browse uploads on the
+    # host (the project path must then be shared with Docker Desktop).
+    - app_storage:/app/storage
+  environment:
+    APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env (openssl rand -hex 32)}
+    AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env (openssl rand -hex 32)}
+    DATABASE_URL: postgresql://unisubmit:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/unisubmit
+    AI_SERVICE_URL: ${DOCKER_AI_SERVICE_URL:-http://host.docker.internal:8001}
+    OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://host.docker.internal:11434}
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+    RAG_VALIDATE_TIMEOUT: ${RAG_VALIDATE_TIMEOUT:-1800}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  # A worker that exits silently stops every validation; bring it back.
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+
 services:
   app:
-    build: .
+    <<: *app
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+
+  # Validation jobs run here, one at a time, never in the web process (DEF-024).
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker"]
+    # Lets an interrupted job be put back in the queue before the stop (DEF-034).
+    stop_grace_period: 30s
+
+  ai-service:
+    profiles: ["ai"]
+    build: ./ai_service
+    ports:
+      - "127.0.0.1:${AI_SERVICE_PORT:-8001}:8001"
     volumes:
-      - ./storage:/app/storage
-      - ./unisubmit.db:/app/unisubmit.db
+      - hf_cache:/root/.cache/huggingface
     environment:
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=qwen3:32b
-  
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env (openssl rand -hex 32)}
+      OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      EMBEDDING_DEVICE: cpu
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-16384}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-4096}
+      OLLAMA_JSON_THINK: ${OLLAMA_JSON_THINK:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+  qdrant:
+    # Pinned to the version that wrote the existing qdrant_storage volume (DEF-031).
+    image: qdrant/qdrant:v1.19.2
+    # No API key: consumers connect by URL. The port stays on 127.0.0.1, so
+    # only this machine and the containers can reach it.
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: unisubmit
+      # Only applied when the volume is first created; an existing pgdata
+      # volume keeps the password it was created with.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: unisubmit
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unisubmit -d unisubmit"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  app_storage:
+  pgdata:
+  qdrant_storage:
+  hf_cache:
