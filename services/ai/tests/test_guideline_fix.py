@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
+
 from unisubmit_ai import main as service
 
 

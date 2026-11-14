@@ -12,10 +12,13 @@ import logging
 import signal
 from datetime import datetime, timedelta
 
+import sqlalchemy as sa
 from sqlalchemy import inspect
+from sqlalchemy.orm import Session, sessionmaker
 
 from .ai_service_client import RAG_VALIDATE_TIMEOUT
-from .db import SessionLocal, engine
+from .core.config import get_settings
+from .core.db import create_db_engine, make_session_factory
 from .main import process_job
 from .models import AIJob
 
@@ -90,24 +93,24 @@ async def run_job(db, job) -> None:
         db.commit()
 
 
-def schema_ready() -> bool:
+def schema_ready(engine: sa.Engine) -> bool:
     return inspect(engine).has_table(AIJob.__tablename__)
 
 
-async def wait_for_schema() -> None:
-    """The web app creates the tables; the worker only waits for them.
+async def wait_for_schema(engine: sa.Engine) -> None:
+    """`unisubmit migrate` creates the tables; the worker only waits for them.
 
-    Both processes calling create_all on an empty database raced, and the
-    loser crashed (DEF-045).
+    Two processes creating tables on an empty database raced, and the loser
+    crashed (DEF-045).
     """
-    while not schema_ready():
-        logger.info("Waiting for the web app to create the database schema")
+    while not schema_ready(engine):
+        logger.info("Waiting for the database schema; run `unisubmit migrate`")
         await asyncio.sleep(POLL_SECONDS)
 
 
-async def run_once() -> bool:
+async def run_once(session_factory: sessionmaker[Session]) -> bool:
     """Process at most one job; returns whether one was found."""
-    db = SessionLocal()
+    db = session_factory()
     try:
         job = claim_next_job(db)
         if job is None:
@@ -118,12 +121,12 @@ async def run_once() -> bool:
         db.close()
 
 
-async def run_forever() -> None:
-    with SessionLocal() as db:
+async def run_forever(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as db:
         requeue_stale_jobs(db)
     while True:
         try:
-            found = await run_once()
+            found = await run_once(session_factory)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -144,12 +147,15 @@ async def main() -> None:
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     except NotImplementedError:  # Windows event loops have no signal handlers
         pass
+    engine = create_db_engine(str(get_settings().database_url))
     try:
-        await wait_for_schema()
+        await wait_for_schema(engine)
         logger.info("Queue worker started; one job at a time, polling every %s s", POLL_SECONDS)
-        await run_forever()
+        await run_forever(make_session_factory(engine))
     except asyncio.CancelledError:
         logger.info("Queue worker stopped")
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

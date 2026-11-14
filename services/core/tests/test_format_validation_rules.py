@@ -25,6 +25,7 @@ import unittest
 from pathlib import Path
 
 import fitz
+
 from unisubmit.format_validation import (
     _find_section,
     _heading_candidates,

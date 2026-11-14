@@ -20,11 +20,12 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-import support  # noqa: F401  sets the test environment before the app is imported
 from fastapi.routing import APIRoute
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import UploadFile
+
+import support  # noqa: F401  sets the test environment before the app is imported
 from support import (
     TEST_AI_TOKEN,
     AppTestCase,
@@ -33,8 +34,8 @@ from support import (
     pdf_bytes,
     web,
 )
-from unisubmit.config import settings
-from unisubmit.db import Base, get_db
+from unisubmit.core.config import get_settings
+from unisubmit.core.db import Base, get_session
 from unisubmit.models import AdminUser, AIJob, Submission, SubmissionVersion
 
 
@@ -71,10 +72,10 @@ class WebProcessTests(AppTestCase):
         allowed = {"index_guideline"}
         offenders = sorted(
             route.endpoint.__name__
-            for route in web.app.routes
+            for route in web.router.routes
             if isinstance(route, APIRoute)
             and inspect.iscoroutinefunction(route.endpoint)
-            and any(dep.call is get_db for dep in route.dependant.dependencies)
+            and any(dep.call is get_session for dep in route.dependant.dependencies)
             and route.endpoint.__name__ not in allowed
         )
         self.assertEqual(offenders, [])
@@ -156,7 +157,9 @@ class ConcurrentUploadTests(unittest.TestCase):
                 except Exception as exc:  # recorded, asserted below
                     errors.append(exc)
 
-        with patch.object(web, "SUBMISSION_STORE", self.tmp):
+        with patch.dict(os.environ, {"UNISUBMIT_STORAGE_DIR": str(self.tmp)}):
+            get_settings.cache_clear()
+            self.addCleanup(get_settings.cache_clear)
             threads = [threading.Thread(target=upload) for _ in range(2)]
             for thread in threads:
                 thread.start()
@@ -180,9 +183,6 @@ class WorkerTests(AppTestCase):
         from unisubmit import worker
 
         self.worker = worker
-        session_patch = patch.object(worker, "SessionLocal", self.Session)
-        session_patch.start()
-        self.addCleanup(session_patch.stop)
 
     def job(self, job_id):
         with self.Session() as db:
@@ -205,7 +205,7 @@ class WorkerTests(AppTestCase):
             await asyncio.gather(task, return_exceptions=True)
 
         with (
-            patch.object(self.worker, "engine", empty),
+            patch.object(self.worker, "create_db_engine", return_value=empty),
             patch.object(self.worker, "POLL_SECONDS", 0.01),
         ):
             asyncio.run(start_then_stop())
@@ -217,7 +217,7 @@ class WorkerTests(AppTestCase):
             job_id = add_version(db, self.world.submission_id, self.tmp, "QUEUED")
 
         with patch.object(self.worker, "process_job", new=AsyncMock()):
-            ran = asyncio.run(self.worker.run_once())
+            ran = asyncio.run(self.worker.run_once(self.Session))
 
         self.assertTrue(ran)
         self.assertEqual(self.job(job_id)[:2], ("COMPLETED", 1))
@@ -261,7 +261,7 @@ class WorkerTests(AppTestCase):
         interrupted = AsyncMock(side_effect=asyncio.CancelledError)
         with patch.object(self.worker, "process_job", new=interrupted):
             with self.assertRaises(asyncio.CancelledError):
-                asyncio.run(self.worker.run_once())
+                asyncio.run(self.worker.run_once(self.Session))
 
         self.assertEqual(self.job(job_id)[:2], ("RETRYING", 0))
 
@@ -279,7 +279,7 @@ class WorkerTests(AppTestCase):
             patch.object(self.worker, "process_job", new=breaks_the_session),
             self.assertLogs("unisubmit.worker", level="ERROR"),
         ):
-            asyncio.run(self.worker.run_once())
+            asyncio.run(self.worker.run_once(self.Session))
 
         status, attempts, error = self.job(job_id)
         self.assertEqual((status, attempts), ("RETRYING", 1))
@@ -300,7 +300,7 @@ class AIServiceRoutingTests(AppTestCase):
     def test_validation_uses_the_configured_ai_service_url(self):
         """DEF-035: the per-profile URL must not override AI_SERVICE_URL."""
         url, _ = self.validate_payload()
-        self.assertEqual(url, settings.ai_service_url)
+        self.assertEqual(url, get_settings().ai_service_url)
 
     def test_validation_sends_the_collection_recorded_at_indexing(self):
         """DEF-032: validation reads the collection indexing created, by name on record."""
@@ -318,7 +318,7 @@ class AIServiceRoutingTests(AppTestCase):
         ):
             self.logged_in_admin().post(f"/admin/template-version/{tv_id}/index")
 
-        self.assertEqual(parse.await_args.args[0], settings.ai_service_url)
+        self.assertEqual(parse.await_args.args[0], get_settings().ai_service_url)
         self.assertEqual(index.await_args.args[1].get("collection"), f"tv_{tv_id}")
 
 
@@ -329,6 +329,7 @@ class AIClientAuthTests(unittest.TestCase):
         import tempfile
 
         import httpx
+
         from unisubmit import ai_service_client as client
 
         seen = []

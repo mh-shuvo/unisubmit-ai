@@ -22,6 +22,7 @@ dev = ["pytest>=9.2", "ruff>=0.17.5", "mypy>=2.4"]
 
 [tool.ruff]
 line-length = 100
+src = ["services/core/src", "services/ai/src", "services/core/tests", "services/ai/tests"]
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -80,8 +81,6 @@ module = [
   "unisubmit.pdf_utils",
   "unisubmit.report_parser",
   "unisubmit.reporting",
-  "unisubmit.security",
-  "unisubmit.seed",
   "unisubmit.validators",
   "unisubmit.worker",
   "unisubmit_ai.main",

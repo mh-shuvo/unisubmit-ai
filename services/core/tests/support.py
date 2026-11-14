@@ -8,7 +8,6 @@ import os
 import shutil
 import tempfile
 import unittest
-from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,17 +16,20 @@ ROOT = Path(__file__).resolve().parents[3]
 
 TEST_SECRET = "test-app-secret-" + "x" * 40
 TEST_AI_TOKEN = "test-ai-token-" + "y" * 40
-os.environ["APP_SECRET"] = TEST_SECRET
-os.environ["AI_SERVICE_TOKEN"] = TEST_AI_TOKEN
-os.environ["DATABASE_URL"] = "sqlite://"  # never used: tests bind their own engine
+os.environ["UNISUBMIT_SECRET_KEY"] = TEST_SECRET
+os.environ["UNISUBMIT_AI_SERVICE_TOKEN"] = TEST_AI_TOKEN
+# Never connected to: tests bind their own engine.
+os.environ["UNISUBMIT_DATABASE_URL"] = "postgresql://unused@127.0.0.1:1/unused"
 
 import fitz  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
+
 from unisubmit import main as web  # noqa: E402
-from unisubmit.db import Base, get_db  # noqa: E402
+from unisubmit.core.config import get_settings  # noqa: E402
+from unisubmit.core.db import Base  # noqa: E402
 from unisubmit.models import (  # noqa: E402
     AdminUser,
     AIJob,
@@ -161,27 +163,20 @@ class AppTestCase(unittest.TestCase):
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine, autoflush=False)
 
-        def override_get_db():
-            db = self.Session()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        web.app.dependency_overrides[get_db] = override_get_db
-        self.addCleanup(web.app.dependency_overrides.clear)
-        stack = ExitStack()
-        self.addCleanup(stack.close)
-        for name in ("SUBMISSION_STORE", "REPORT_STORE", "TEMPLATE_STORE"):
-            stack.enter_context(patch.object(web, name, self.tmp))
-        # If the web startup ever opens a session again (DEF-024, DEF-028), it
-        # must land in this test database, where the tests can see its effect.
-        stack.enter_context(patch.object(web, "SessionLocal", self.Session, create=True))
+        storage = patch.dict(os.environ, {"UNISUBMIT_STORAGE_DIR": str(self.tmp)})
+        storage.start()
+        self.addCleanup(storage.stop)
+        get_settings.cache_clear()
+        self.addCleanup(get_settings.cache_clear)
+        # Anything the app does at startup lands in this test database, where
+        # the tests can see its effect (DEF-024, DEF-028).
+        self.app = web.create_app()
+        self.app.state.session_factory = self.Session
         with self.Session() as db:
             self.world = build_world(db, self.tmp)
 
     def client(self) -> TestClient:
-        return TestClient(web.app, follow_redirects=False)
+        return TestClient(self.app, follow_redirects=False)
 
     def logged_in_student(self) -> TestClient:
         client = self.client()

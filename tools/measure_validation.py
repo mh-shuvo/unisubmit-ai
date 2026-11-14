@@ -2,9 +2,9 @@
 
     python tools/measure_validation.py --template-version 1 --pdf path/to/thesis.pdf
 
-Reads the template version from DATABASE_URL (read only), runs the
+Reads the template version from UNISUBMIT_DATABASE_URL (read only), runs the
 deterministic checks in this process and the semantic check through the AI
-service at AI_SERVICE_URL, exactly as the worker would, and prints the time of
+service at UNISUBMIT_AI_SERVICE_URL, exactly as the worker would, and prints the time of
 each stage as JSON. It writes nothing to the database, the queue or storage,
 so it can run beside a live stack. Ollama is shared, though: do not run it
 while the worker is validating (LIM-003).
@@ -21,8 +21,8 @@ import time
 from pathlib import Path
 
 from unisubmit.ai_service_client import health, rag_validate
-from unisubmit.config import settings
-from unisubmit.db import SessionLocal
+from unisubmit.core.config import get_settings
+from unisubmit.core.db import create_db_engine, make_session_factory
 from unisubmit.format_validation import validate_all_profile_rules
 from unisubmit.main import _normalize_profile_severities, semantic_validation_payload
 from unisubmit.models import TemplateVersion
@@ -43,7 +43,8 @@ def main() -> int:
     parser.add_argument("--model", help="override the AI profile's base model")
     args = parser.parse_args()
 
-    with SessionLocal() as db:
+    settings = get_settings()
+    with make_session_factory(create_db_engine(str(settings.database_url)))() as db:
         tv = db.get(TemplateVersion, args.template_version)
         if tv is None:
             print(f"Template version {args.template_version} not found.", file=sys.stderr)

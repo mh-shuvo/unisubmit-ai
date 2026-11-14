@@ -1,10 +1,12 @@
 import json
 import shutil
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,8 +23,8 @@ from .ai_service_client import (
     parse_guideline_profile,
     rag_validate,
 )
-from .config import settings
-from .db import Base, engine, get_db
+from .core.config import get_settings
+from .core.db import DbSession, create_db_engine, make_session_factory
 from .emailer import send_submission_email
 from .format_validation import validate_all_profile_rules
 from .models import (
@@ -48,31 +50,16 @@ from .security import hash_password, verify_password
 from .validators import run_rules
 
 PACKAGE = Path(__file__).resolve().parent
-STORAGE = settings.storage_dir.resolve()
-TEMPLATE_STORE = STORAGE / "templates"
-SUBMISSION_STORE = STORAGE / "submissions"
-REPORT_STORE = STORAGE / "reports"
-for p in [TEMPLATE_STORE, SUBMISSION_STORE, REPORT_STORE]:
-    p.mkdir(parents=True, exist_ok=True)
-
-app = FastAPI(title="UniSubmit AI", version="9.10")
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=settings.app_secret,
-    max_age=60 * 60 * 12,
-    same_site="lax",
-)
-app.mount("/static", StaticFiles(directory=str(PACKAGE / "static")), name="static")
 templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
-templates.env.globals["default_llm_model"] = settings.ollama_model
+router = APIRouter()
 
 
-@app.on_event("startup")
-def startup():
-    # Validation jobs run in a separate process, `python -m unisubmit.worker` (DEF-024).
-    # Accounts and demo data come from `python -m unisubmit.seed` (DEF-028).
-    Base.metadata.create_all(bind=engine)
+def store(name: str) -> Path:
+    """`templates`, `submissions` or `reports` under the storage root."""
+    path = get_settings().storage_dir.resolve() / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # ---------- helpers ----------
@@ -312,8 +299,8 @@ def same_unit(program, u):
 
 
 # ---------- public ----------
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_db)):
+@router.get("/", response_class=HTMLResponse)
+def home(request: Request, db: DbSession):
     return templates.TemplateResponse(
         "home.html",
         {
@@ -325,13 +312,13 @@ def home(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/how-it-works", response_class=HTMLResponse)
+@router.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
     return templates.TemplateResponse("how_it_works.html", {"request": request})
 
 
-@app.get("/guidelines", response_class=HTMLResponse)
-def guidelines(request: Request, db: Session = Depends(get_db)):
+@router.get("/guidelines", response_class=HTMLResponse)
+def guidelines(request: Request, db: DbSession):
     versions = (
         db.query(TemplateVersion)
         .filter(TemplateVersion.status == "Active")
@@ -341,8 +328,8 @@ def guidelines(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("guidelines.html", {"request": request, "versions": versions})
 
 
-@app.get("/guidelines/{version_id}/download")
-def guideline_download(version_id: int, db: Session = Depends(get_db)):
+@router.get("/guidelines/{version_id}/download")
+def guideline_download(version_id: int, db: DbSession):
     tv = db.get(TemplateVersion, version_id)
     if not tv:
         raise HTTPException(404)
@@ -354,8 +341,8 @@ def guideline_download(version_id: int, db: Session = Depends(get_db)):
 
 
 # ---------- student auth ----------
-@app.get("/student/register", response_class=HTMLResponse)
-def student_register_page(request: Request, db: Session = Depends(get_db)):
+@router.get("/student/register", response_class=HTMLResponse)
+def student_register_page(request: Request, db: DbSession):
     return templates.TemplateResponse(
         "student_register.html",
         {
@@ -367,16 +354,16 @@ def student_register_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/student/register")
+@router.post("/student/register")
 def student_register(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     student_id: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     unit_type: str = Form(...),
     unit_id: int = Form(...),
-    db: Session = Depends(get_db),
 ):
     if db.query(StudentUser).filter(StudentUser.email == email.strip().lower()).first():
         return RedirectResponse(
@@ -404,7 +391,7 @@ def student_register(
     return RedirectResponse("/student/dashboard", 303)
 
 
-@app.get("/student/login", response_class=HTMLResponse)
+@router.get("/student/login", response_class=HTMLResponse)
 def student_login_page(request: Request):
     return templates.TemplateResponse(
         "student_login.html",
@@ -412,12 +399,12 @@ def student_login_page(request: Request):
     )
 
 
-@app.post("/student/login")
+@router.post("/student/login")
 def student_login(
     request: Request,
+    db: DbSession,
     email: str = Form(...),
     password: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     s = (
         db.query(StudentUser)
@@ -431,14 +418,14 @@ def student_login(
     return RedirectResponse("/student/dashboard", 303)
 
 
-@app.get("/student/logout")
+@router.get("/student/logout")
 def student_logout(request: Request):
     request.session.clear()
     return RedirectResponse("/", 303)
 
 
-@app.get("/student/dashboard", response_class=HTMLResponse)
-def student_dashboard(request: Request, db: Session = Depends(get_db)):
+@router.get("/student/dashboard", response_class=HTMLResponse)
+def student_dashboard(request: Request, db: DbSession):
     s = require_student(request, db)
     rows = (
         db.query(Submission)
@@ -458,14 +445,14 @@ def student_dashboard(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/student/profile", response_class=HTMLResponse)
-def student_profile(request: Request, db: Session = Depends(get_db)):
+@router.get("/student/profile", response_class=HTMLResponse)
+def student_profile(request: Request, db: DbSession):
     s = require_student(request, db)
     return templates.TemplateResponse("student_profile.html", {"request": request, "student": s})
 
 
 # ---------- admin auth ----------
-@app.get("/admin/login", response_class=HTMLResponse)
+@router.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(request: Request):
     return templates.TemplateResponse(
         "admin_login.html",
@@ -473,12 +460,12 @@ def admin_login_page(request: Request):
     )
 
 
-@app.post("/admin/login")
+@router.post("/admin/login")
 def admin_login(
     request: Request,
+    db: DbSession,
     email: str = Form(...),
     password: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     u = (
         db.query(AdminUser)
@@ -492,14 +479,14 @@ def admin_login(
     return RedirectResponse("/admin", 303)
 
 
-@app.get("/admin/logout")
+@router.get("/admin/logout")
 def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse("/", 303)
 
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_dashboard(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         metrics = {
@@ -531,8 +518,8 @@ def admin_dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------- super admin ----------
-@app.get("/admin/structure", response_class=HTMLResponse)
-def super_structure(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/structure", response_class=HTMLResponse)
+def super_structure(request: Request, db: DbSession):
     u = require_super(request, db)
     return templates.TemplateResponse(
         "super_structure.html",
@@ -548,12 +535,12 @@ def super_structure(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/admin/faculties")
+@router.post("/admin/faculties")
 def add_faculty(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     code: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     require_super(request, db)
     db.add(Faculty(name=name.strip(), code=code.strip().upper()))
@@ -567,12 +554,12 @@ def add_faculty(
     return RedirectResponse(flash_url("/admin/structure", message="Faculty created"), 303)
 
 
-@app.post("/admin/institutes")
+@router.post("/admin/institutes")
 def add_institute(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     code: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     require_super(request, db)
     db.add(Institute(name=name.strip(), code=code.strip().upper()))
@@ -587,13 +574,13 @@ def add_institute(
     return RedirectResponse(flash_url("/admin/structure", message="Institute created"), 303)
 
 
-@app.post("/admin/departments")
+@router.post("/admin/departments")
 def add_department(
     request: Request,
+    db: DbSession,
     faculty_id: int = Form(...),
     name: str = Form(...),
     code: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     require_super(request, db)
     db.add(Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty_id))
@@ -608,8 +595,8 @@ def add_department(
     return RedirectResponse(flash_url("/admin/structure", message="Department created"), 303)
 
 
-@app.get("/admin/admins", response_class=HTMLResponse)
-def admin_accounts(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/admins", response_class=HTMLResponse)
+def admin_accounts(request: Request, db: DbSession):
     u = require_super(request, db)
     return templates.TemplateResponse(
         "super_admins.html",
@@ -625,15 +612,15 @@ def admin_accounts(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/admin/admins")
+@router.post("/admin/admins")
 def create_unit_admin(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     unit_type: str = Form(...),
     unit_id: int = Form(...),
-    db: Session = Depends(get_db),
 ):
     require_super(request, db)
     dep = unit_id if unit_type == "department" else None
@@ -658,10 +645,10 @@ def create_unit_admin(
     )
 
 
-@app.get("/admin/ai", response_class=HTMLResponse)
-def super_ai(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/ai", response_class=HTMLResponse)
+def super_ai(request: Request, db: DbSession):
     u = require_super(request, db)
-    status = ai_health(settings.ai_service_url)
+    status = ai_health(get_settings().ai_service_url)
     profiles = db.query(AIProfile).all()
     return templates.TemplateResponse(
         "super_ai.html",
@@ -670,8 +657,8 @@ def super_ai(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------- unit admin ----------
-@app.get("/admin/programs", response_class=HTMLResponse)
-def unit_program_page(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/programs", response_class=HTMLResponse)
+def unit_program_page(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
@@ -686,13 +673,13 @@ def unit_program_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/admin/programs")
+@router.post("/admin/programs")
 def unit_add_program(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     code: str = Form(...),
     level: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
@@ -710,8 +697,8 @@ def unit_add_program(
     return RedirectResponse(flash_url("/admin/programs", message="Program added"), 303)
 
 
-@app.get("/admin/supervisors", response_class=HTMLResponse)
-def unit_supervisors(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/supervisors", response_class=HTMLResponse)
+def unit_supervisors(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
@@ -727,13 +714,13 @@ def unit_supervisors(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/admin/supervisors")
+@router.post("/admin/supervisors")
 def unit_add_supervisor(
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     designation: str = Form(...),
     email: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
@@ -758,8 +745,8 @@ def unit_add_supervisor(
     return RedirectResponse(flash_url("/admin/supervisors", message="Supervisor added"), 303)
 
 
-@app.get("/admin/configuration", response_class=HTMLResponse)
-def unit_configuration(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/configuration", response_class=HTMLResponse)
+def unit_configuration(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         return HTTPException(403)
@@ -779,13 +766,13 @@ def unit_configuration(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/admin/configuration")
+@router.post("/admin/configuration")
 def add_configuration(
     request: Request,
+    db: DbSession,
     program_id: int = Form(...),
     submission_type: str = Form(...),
     title: str = Form(...),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     p = db.get(Program, program_id)
@@ -813,17 +800,17 @@ def add_configuration(
     )
 
 
-@app.post("/admin/configuration/{template_id}/version")
+@router.post("/admin/configuration/{template_id}/version")
 def add_version(
     request: Request,
     template_id: int,
+    db: DbSession,
     version: str = Form(...),
     effective_from: str = Form(""),
     status: str = Form("Draft"),
     change_note: str = Form(""),
     pdf: UploadFile = File(...),
     additional_rules_pdf: UploadFile | None = File(None),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     t = db.get(Template, template_id)
@@ -833,7 +820,7 @@ def add_version(
         return RedirectResponse(
             flash_url("/admin/configuration", error="Guideline must be PDF"), 303
         )
-    dest = TEMPLATE_STORE / f"guideline_{uuid.uuid4().hex}.pdf"
+    dest = store("templates") / f"guideline_{uuid.uuid4().hex}.pdf"
     with dest.open("wb") as f:
         shutil.copyfileobj(pdf.file, f)
     try:
@@ -852,7 +839,7 @@ def add_version(
                 ),
                 303,
             )
-        ad = TEMPLATE_STORE / f"additional_{uuid.uuid4().hex}.pdf"
+        ad = store("templates") / f"additional_{uuid.uuid4().hex}.pdf"
         with ad.open("wb") as f:
             shutil.copyfileobj(additional_rules_pdf.file, f)
         try:
@@ -891,8 +878,8 @@ def add_version(
     return RedirectResponse(f"/admin/template-version/{tv.id}", 303)
 
 
-@app.get("/admin/template-version/{version_id}", response_class=HTMLResponse)
-def template_version_page(version_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/template-version/{version_id}", response_class=HTMLResponse)
+def template_version_page(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -920,12 +907,12 @@ async def _form_data(request: Request) -> FormData:
     return await request.form()
 
 
-@app.post("/admin/template-version/{version_id}/review-rules")
+@router.post("/admin/template-version/{version_id}/review-rules")
 def review_guideline_rules(
     version_id: int,
     request: Request,
+    db: DbSession,
     form: FormData = Depends(_form_data),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
@@ -999,15 +986,15 @@ def review_guideline_rules(
     )
 
 
-@app.post("/admin/template-version/{version_id}/semantic-rules")
+@router.post("/admin/template-version/{version_id}/semantic-rules")
 def add_manual_semantic_rule(
     version_id: int,
     request: Request,
+    db: DbSession,
     requirement: str = Form(...),
     target_section: str = Form(""),
     severity: str = Form("Mandatory"),
     expected_evidence: str = Form(""),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
@@ -1066,16 +1053,16 @@ def add_manual_semantic_rule(
     return RedirectResponse(flash_url(f"/admin/template-version/{version_id}", message=msg), 303)
 
 
-@app.post("/admin/template-version/{version_id}/semantic-rules/{semantic_id}/update")
+@router.post("/admin/template-version/{version_id}/semantic-rules/{semantic_id}/update")
 def update_manual_semantic_rule(
     version_id: int,
     semantic_id: str,
     request: Request,
+    db: DbSession,
     requirement: str = Form(...),
     target_section: str = Form(""),
     severity: str = Form("Mandatory"),
     expected_evidence: str = Form(""),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
@@ -1129,10 +1116,8 @@ def update_manual_semantic_rule(
     )
 
 
-@app.post("/admin/template-version/{version_id}/semantic-rules/{semantic_id}/delete")
-def delete_manual_semantic_rule(
-    version_id: int, semantic_id: str, request: Request, db: Session = Depends(get_db)
-):
+@router.post("/admin/template-version/{version_id}/semantic-rules/{semantic_id}/delete")
+def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -1165,8 +1150,8 @@ def delete_manual_semantic_rule(
     )
 
 
-@app.post("/admin/template-version/{version_id}/activate-profile")
-def activate_guideline_profile(version_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/admin/template-version/{version_id}/activate-profile")
+def activate_guideline_profile(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -1205,16 +1190,16 @@ def activate_guideline_profile(version_id: int, request: Request, db: Session = 
     )
 
 
-@app.post("/admin/template-version/{version_id}/rules")
+@router.post("/admin/template-version/{version_id}/rules")
 def add_restriction(
     version_id: int,
     request: Request,
+    db: DbSession,
     name: str = Form(...),
     severity: str = Form(...),
     validator: str = Form(...),
     target: str = Form(""),
     expected: str = Form(""),
-    db: Session = Depends(get_db),
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
@@ -1242,8 +1227,8 @@ def add_restriction(
     )
 
 
-@app.post("/admin/template-version/{version_id}/index")
-async def index_guideline(version_id: int, request: Request, db: Session = Depends(get_db)):
+@router.post("/admin/template-version/{version_id}/index")
+async def index_guideline(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -1263,7 +1248,7 @@ async def index_guideline(version_id: int, request: Request, db: Session = Depen
         profile = AIProfile(
             program_id=p.id,
             submission_type=tv.template.submission_type,
-            service_url=settings.ai_service_url,
+            service_url=get_settings().ai_service_url,
             status="Active",
         )
         db.add(profile)
@@ -1276,7 +1261,7 @@ async def index_guideline(version_id: int, request: Request, db: Session = Depen
         "base_model": profile.base_model,
     }
     parsed_profile = await parse_guideline_profile(
-        settings.ai_service_url, parse_fields, tv.pdf_path
+        get_settings().ai_service_url, parse_fields, tv.pdf_path
     )
     if parsed_profile.get("status") != "success":
         tv.format_profile_json = "{}"
@@ -1329,12 +1314,12 @@ async def index_guideline(version_id: int, request: Request, db: Session = Depen
         "collection": f"tv_{tv.id}",
         "recreate": "true",
     }
-    result = await index_template(settings.ai_service_url, fields, tv.pdf_path)
+    result = await index_template(get_settings().ai_service_url, fields, tv.pdf_path)
     if result.get("status") == "success" and tv.additional_rules_pdf_path:
         extra_fields = dict(fields)
         extra_fields["recreate"] = "false"
         extra_result = await index_template(
-            settings.ai_service_url, extra_fields, tv.additional_rules_pdf_path
+            get_settings().ai_service_url, extra_fields, tv.additional_rules_pdf_path
         )
         if extra_result.get("status") != "success":
             result = {
@@ -1367,8 +1352,8 @@ async def index_guideline(version_id: int, request: Request, db: Session = Depen
     )
 
 
-@app.get("/admin/submissions", response_class=HTMLResponse)
-def unit_submissions(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/submissions", response_class=HTMLResponse)
+def unit_submissions(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
@@ -1384,8 +1369,8 @@ def unit_submissions(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/admin/queue", response_class=HTMLResponse)
-def unit_queue(request: Request, db: Session = Depends(get_db)):
+@router.get("/admin/queue", response_class=HTMLResponse)
+def unit_queue(request: Request, db: DbSession):
     u = require_admin(request, db)
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
@@ -1402,8 +1387,8 @@ def unit_queue(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------- APIs ----------
-@app.get("/api/faculty/{faculty_id}/departments")
-def faculty_departments(faculty_id: int, db: Session = Depends(get_db)):
+@router.get("/api/faculty/{faculty_id}/departments")
+def faculty_departments(faculty_id: int, db: DbSession):
     return [
         {"id": d.id, "name": d.name, "code": d.code}
         for d in db.query(Department)
@@ -1413,8 +1398,8 @@ def faculty_departments(faculty_id: int, db: Session = Depends(get_db)):
     ]
 
 
-@app.get("/api/student/options/{program_id}")
-def student_options(program_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/api/student/options/{program_id}")
+def student_options(program_id: int, request: Request, db: DbSession):
     s = require_student(request, db)
     p = db.get(Program, program_id)
     if not p or not same_unit(p, s):
@@ -1442,8 +1427,8 @@ def student_options(program_id: int, request: Request, db: Session = Depends(get
 
 
 # ---------- submission ----------
-@app.get("/submit", response_class=HTMLResponse)
-def submit_form(request: Request, db: Session = Depends(get_db)):
+@router.get("/submit", response_class=HTMLResponse)
+def submit_form(request: Request, db: DbSession):
     s = require_student(request, db)
     return templates.TemplateResponse(
         "submit.html",
@@ -1451,15 +1436,15 @@ def submit_form(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/submit")
+@router.post("/submit")
 def submit(
     request: Request,
+    db: DbSession,
     title: str = Form(...),
     program_id: int = Form(...),
     teacher_id: int = Form(...),
     template_version_id: int = Form(...),
     pdf: UploadFile = File(...),
-    db: Session = Depends(get_db),
 ):
     s = require_student(request, db)
     p = db.get(Program, program_id)
@@ -1496,12 +1481,12 @@ def submit(
     return RedirectResponse(f"/submission/{sub.id}", 303)
 
 
-@app.post("/submission/{submission_id}/resubmit")
+@router.post("/submission/{submission_id}/resubmit")
 def resubmit(
     submission_id: int,
     request: Request,
+    db: DbSession,
     pdf: UploadFile = File(...),
-    db: Session = Depends(get_db),
 ):
     s = require_student(request, db)
     sub = db.get(Submission, submission_id)
@@ -1550,7 +1535,7 @@ def save_queue_version(sub, pdf, db):
         .scalar()
         or 0
     ) + 1
-    dest = SUBMISSION_STORE / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
+    dest = store("submissions") / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
     with dest.open("wb") as f:
         shutil.copyfileobj(pdf.file, f)
     try:
@@ -1574,8 +1559,8 @@ def save_queue_version(sub, pdf, db):
     return sv
 
 
-@app.get("/submission/{submission_id}", response_class=HTMLResponse)
-def view_submission(submission_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/submission/{submission_id}", response_class=HTMLResponse)
+def view_submission(submission_id: int, request: Request, db: DbSession):
     s = require_student(request, db)
     sub = db.get(Submission, submission_id)
     if not sub or sub.student_user_id != s.id:
@@ -1597,8 +1582,8 @@ def view_submission(submission_id: int, request: Request, db: Session = Depends(
     )
 
 
-@app.get("/files/submission/{version_id}")
-def download_submission(version_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/files/submission/{version_id}")
+def download_submission(version_id: int, request: Request, db: DbSession):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
     if not v or v.submission.student_user_id != s.id:
@@ -1610,10 +1595,8 @@ def download_submission(version_id: int, request: Request, db: Session = Depends
     )
 
 
-@app.get("/submission/{submission_id}/report/{version_id}", response_class=HTMLResponse)
-def view_validation_report(
-    submission_id: int, version_id: int, request: Request, db: Session = Depends(get_db)
-):
+@router.get("/submission/{submission_id}/report/{version_id}", response_class=HTMLResponse)
+def view_validation_report(submission_id: int, version_id: int, request: Request, db: DbSession):
     s = require_student(request, db)
     sub = db.get(Submission, submission_id)
     v = db.get(SubmissionVersion, version_id)
@@ -1661,8 +1644,8 @@ def view_validation_report(
     )
 
 
-@app.get("/files/report/{version_id}")
-def download_report_legacy(version_id: int, request: Request, db: Session = Depends(get_db)):
+@router.get("/files/report/{version_id}")
+def download_report_legacy(version_id: int, request: Request, db: DbSession):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
     if not v or v.submission.student_user_id != s.id:
@@ -1671,13 +1654,13 @@ def download_report_legacy(version_id: int, request: Request, db: Session = Depe
     return RedirectResponse(f"/files/report/{v.submission_id}/{v.id}/{token}", 303)
 
 
-@app.get("/files/report/{submission_id}/{version_id}/{run_token}")
+@router.get("/files/report/{submission_id}/{version_id}/{run_token}")
 def download_report_bound(
     submission_id: int,
     version_id: int,
     run_token: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: DbSession,
 ):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
@@ -1691,7 +1674,7 @@ def download_report_bound(
         )
     results = json.loads(v.validation_json or "[]")
     report = (
-        REPORT_STORE
+        store("reports")
         / f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
     )
     build_validation_report(str(report), v.submission, v, results, v.ai_suggestions or "")
@@ -1767,7 +1750,7 @@ async def process_job(db, job):
         )
         # One AI service per installation: a URL stored on an old profile row
         # must not override the configured one (DEF-035).
-        ai = await rag_validate(settings.ai_service_url, payload)
+        ai = await rag_validate(get_settings().ai_service_url, payload)
         if not ai:
             raise RuntimeError("AI service unavailable or RAG validation failed")
         ai_text = ai.get("response", "")
@@ -1788,7 +1771,7 @@ async def process_job(db, job):
     sv.status = final_status
     sub.status = final_status
     run_token = _report_run_token(sv)
-    report = REPORT_STORE / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
+    report = store("reports") / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
     build_validation_report(str(report), sub, sv, results, ai_text)
     sv.report_path = str(report)
     db.commit()
@@ -1806,20 +1789,45 @@ async def process_job(db, job):
         db.commit()
 
 
-# Browser-friendly auth redirects
-from fastapi.exceptions import HTTPException as _HTTPException
-from fastapi.responses import RedirectResponse as _Redirect
-
-
-@app.exception_handler(_HTTPException)
-async def friendly_http_error(request: Request, exc: _HTTPException):
+async def friendly_http_error(request: Request, exc: HTTPException):
+    """Browser-friendly auth redirects."""
     if exc.status_code == 401:
         if request.url.path.startswith("/admin"):
-            return _Redirect("/admin/login", 303)
+            return RedirectResponse("/admin/login", 303)
         if (
             request.url.path.startswith("/student")
             or request.url.path.startswith("/submit")
             or request.url.path.startswith("/submission")
         ):
-            return _Redirect("/student/login", 303)
+            return RedirectResponse("/student/login", 303)
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+
+def create_app() -> FastAPI:
+    """Run with `uvicorn unisubmit.main:create_app --factory`.
+
+    The app creates no tables and no accounts at startup: the schema comes from
+    `unisubmit migrate` (DEF-039), accounts from `unisubmit create-super-admin`
+    (DEF-028). Validation jobs run in `python -m unisubmit.worker` (DEF-024).
+    """
+    settings = get_settings()
+    engine = create_db_engine(str(settings.database_url))
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        engine.dispose()
+
+    app = FastAPI(title="UniSubmit AI", version="10.0", lifespan=lifespan)
+    app.state.session_factory = make_session_factory(engine)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.secret_key.get_secret_value(),
+        max_age=60 * 60 * 12,
+        same_site="lax",
+    )
+    app.add_exception_handler(HTTPException, friendly_http_error)
+    app.include_router(router)
+    app.mount("/static", StaticFiles(directory=str(PACKAGE / "static")), name="static")
+    templates.env.globals["default_llm_model"] = settings.ollama_model
+    return app

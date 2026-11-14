@@ -2,10 +2,11 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
-from .config import settings
+from .core.config import get_settings
 
 
 def send_submission_email(to_email: str, subject: str, body: str, attachments: list[str]):
+    settings = get_settings()
     if not settings.smtp_host:
         return False, "SMTP not configured. Email was not sent."
     msg = EmailMessage()
@@ -23,6 +24,6 @@ def send_submission_email(to_email: str, subject: str, body: str, attachments: l
         if settings.smtp_use_tls:
             server.starttls()
         if settings.smtp_username:
-            server.login(settings.smtp_username, settings.smtp_password)
+            server.login(settings.smtp_username, settings.smtp_password.get_secret_value())
         server.send_message(msg)
     return True, "Email sent."

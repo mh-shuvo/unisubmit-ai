@@ -16,6 +16,7 @@ from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+
 from unisubmit_ai import main as service
 
 TOKEN = "test-ai-token-" + "y" * 40

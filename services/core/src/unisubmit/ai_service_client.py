@@ -3,7 +3,7 @@ import os
 
 import httpx
 
-from .config import settings
+from .core.config import get_settings
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -14,7 +14,7 @@ RAG_VALIDATE_TIMEOUT = float(os.getenv("RAG_VALIDATE_TIMEOUT", "1800"))
 
 def _auth() -> dict:
     """The AI service rejects calls without the shared token (DEF-029)."""
-    return {"Authorization": f"Bearer {settings.ai_service_token}"}
+    return {"Authorization": f"Bearer {get_settings().ai_service_token.get_secret_value()}"}
 
 
 def health(service_url: str) -> dict:

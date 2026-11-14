@@ -14,18 +14,25 @@ import re
 import unittest
 from unittest.mock import patch
 
-import support  # noqa: F401  sets the test environment before the app is imported
 import yaml
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+import support  # noqa: F401  sets the test environment before the app is imported
 from support import ROOT
-from unisubmit.config import Settings
-from unisubmit.db import Base
+from unisubmit.core.config import Settings, get_settings
+from unisubmit.core.db import Base
 from unisubmit.models import AdminUser, Faculty
 
 STRONG = "a" * 16 + "b" * 16 + "c" * 8
+DATABASE = "postgresql+psycopg://unisubmit:pw@127.0.0.1:5433/unisubmit"
+VALID = {
+    "UNISUBMIT_SECRET_KEY": STRONG,
+    "UNISUBMIT_AI_SERVICE_TOKEN": STRONG[::-1],
+    "UNISUBMIT_DATABASE_URL": DATABASE,
+}
 
 
 def settings_from(**env):
@@ -33,11 +40,15 @@ def settings_from(**env):
         return Settings(_env_file=None)
 
 
+def without(name, **overrides):
+    return {key: value for key, value in VALID.items() if key != name} | overrides
+
+
 class SecretSettingsTests(unittest.TestCase):
-    def test_missing_app_secret_is_rejected(self):
+    def test_missing_secret_key_is_rejected(self):
         """DEF-027"""
         with self.assertRaises(ValidationError):
-            settings_from(AI_SERVICE_TOKEN=STRONG)
+            settings_from(**without("UNISUBMIT_SECRET_KEY"))
 
     def test_published_placeholder_secrets_are_rejected(self):
         """DEF-027: the values shipped in .env.example and compose must not run."""
@@ -46,21 +57,44 @@ class SecretSettingsTests(unittest.TestCase):
             "replace-with-a-long-random-secret",
         ):
             with self.subTest(placeholder=placeholder), self.assertRaises(ValidationError):
-                settings_from(APP_SECRET=placeholder, AI_SERVICE_TOKEN=STRONG)
+                settings_from(**VALID | {"UNISUBMIT_SECRET_KEY": placeholder})
 
-    def test_short_app_secret_is_rejected(self):
+    def test_short_secret_key_is_rejected(self):
         """DEF-027"""
         with self.assertRaises(ValidationError):
-            settings_from(APP_SECRET="short-secret", AI_SERVICE_TOKEN=STRONG)
+            settings_from(**VALID | {"UNISUBMIT_SECRET_KEY": "short-secret"})
 
     def test_missing_ai_service_token_is_rejected(self):
         """DEF-029"""
         with self.assertRaises(ValidationError):
-            settings_from(APP_SECRET=STRONG)
+            settings_from(**without("UNISUBMIT_AI_SERVICE_TOKEN"))
 
-    def test_strong_values_are_accepted(self):
-        settings = settings_from(APP_SECRET=STRONG, AI_SERVICE_TOKEN=STRONG[::-1])
-        self.assertEqual(settings.app_secret, STRONG)
+    def test_strong_values_are_accepted_and_hidden(self):
+        settings = settings_from(**VALID)
+        self.assertEqual(
+            (settings.secret_key.get_secret_value(), STRONG in repr(settings)), (STRONG, False)
+        )
+
+    def test_startup_names_every_missing_variable(self):
+        """P1.5: a missing secret stops startup with the variable to set."""
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit) as stop:
+            get_settings.cache_clear()
+            self.addCleanup(get_settings.cache_clear)
+            with patch.dict(Settings.model_config, {"env_file": None}):
+                get_settings()
+        message = str(stop.exception)
+        self.assertEqual(
+            [name in message for name in VALID],
+            [True, True, True],
+        )
+
+    def test_plain_postgresql_url_uses_psycopg_3(self):
+        settings = settings_from(**VALID | {"UNISUBMIT_DATABASE_URL": "postgresql://u:p@db/x"})
+        self.assertEqual(str(settings.database_url), "postgresql+psycopg://u:p@db/x")
+
+    def test_non_postgres_database_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            settings_from(**VALID | {"UNISUBMIT_DATABASE_URL": "sqlite:///./unisubmit.db"})
 
 
 class AdminBootstrapTests(unittest.TestCase):

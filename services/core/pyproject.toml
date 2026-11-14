@@ -11,11 +11,15 @@ dependencies = [
   "itsdangerous>=2.2",            # SessionMiddleware signing
   "pydantic-settings>=2.16",
   "sqlalchemy>=2.1.8",
-  "psycopg2-binary>=2.9.10",
+  "psycopg[binary]>=3.3",
+  "alembic>=1.20",
   "httpx>=0.28",
   "pymupdf>=1.25.5,<2",           # 2.x exists: upgrade separately, behind the rule tests
   "reportlab>=4.4",
 ]
+
+[project.scripts]
+unisubmit = "unisubmit.cli:main"
 
 [build-system]
 requires = ["hatchling"]

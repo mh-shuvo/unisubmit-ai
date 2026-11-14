@@ -1,25 +1,20 @@
-"""Bootstrap commands, run deliberately rather than on every web startup.
-
-    python -m unisubmit.seed demo-data                 # sample faculty, programs, supervisors
-    python -m unisubmit.seed super-admin --email ...   # first Super Admin, password prompted
+"""Bootstrap data, created deliberately through the CLI rather than on every
+web startup: `unisubmit seed-demo` and `unisubmit create-super-admin`.
 
 The web startup used to call `seed()`, which created `admin@unisubmit.local`
 with the password `Admin@123`, published in the README (DEF-028).
 """
 
-import argparse
-import getpass
-import os
-import sys
+from sqlalchemy.orm import Session
 
-from .config import settings
+from .core.config import get_settings
 from .models import AdminUser, AIProfile, Department, Faculty, Program, Teacher, Template
 from .security import hash_password
 
 MIN_ADMIN_PASSWORD = 12
 
 
-def seed_demo_data(db):
+def seed_demo_data(db: Session) -> None:
     """Sample academic structure for a demo. Creates no accounts."""
     if db.query(Faculty).count() == 0:
         sci = Faculty(name="Faculty of Science", code="SCI")
@@ -59,8 +54,8 @@ def seed_demo_data(db):
             AIProfile(
                 program_id=bsc.id,
                 submission_type="Project Report",
-                service_url=settings.ai_service_url,
-                base_model=settings.ollama_model,
+                service_url=get_settings().ai_service_url,
+                base_model=get_settings().ollama_model,
                 embedding_model="BAAI/bge-m3",
                 status="Active",
             )
@@ -68,7 +63,7 @@ def seed_demo_data(db):
     db.commit()
 
 
-def create_super_admin(db, name: str, email: str, password: str) -> AdminUser:
+def create_super_admin(db: Session, name: str, email: str, password: str) -> AdminUser:
     email = email.strip().lower()
     if len(password) < MIN_ADMIN_PASSWORD:
         raise ValueError(f"The password must be at least {MIN_ADMIN_PASSWORD} characters.")
@@ -80,43 +75,3 @@ def create_super_admin(db, name: str, email: str, password: str) -> AdminUser:
     db.add(admin)
     db.commit()
     return admin
-
-
-def main(argv=None) -> int:
-    from .db import Base, SessionLocal, engine
-
-    parser = argparse.ArgumentParser(
-        prog="python -m unisubmit.seed", description=__doc__.splitlines()[0]
-    )
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("demo-data", help="create the sample faculty, programs and supervisors")
-    admin = commands.add_parser("super-admin", help="create a Super Admin account")
-    admin.add_argument("--email", required=True)
-    admin.add_argument("--name", default="System Super Admin")
-    args = parser.parse_args(argv)
-
-    Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        if args.command == "demo-data":
-            seed_demo_data(db)
-            print("Demo academic data is in place.")
-            return 0
-        # UNISUBMIT_ADMIN_PASSWORD allows a non-interactive run, e.g. in Docker.
-        password = os.environ.get("UNISUBMIT_ADMIN_PASSWORD") or getpass.getpass("Password: ")
-        if (
-            not os.environ.get("UNISUBMIT_ADMIN_PASSWORD")
-            and getpass.getpass("Repeat password: ") != password
-        ):
-            print("The passwords do not match.", file=sys.stderr)
-            return 1
-        try:
-            create_super_admin(db, args.name, args.email, password)
-        except ValueError as exc:
-            print(exc, file=sys.stderr)
-            return 1
-        print(f"Super Admin {args.email.strip().lower()} created.")
-        return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
