@@ -8,7 +8,7 @@ wording.
 """
 import unittest
 
-import main as service
+from unisubmit_ai import main as service
 
 DUAL_LEVEL = (
     "This template applies to Bachelor of Science (B.Sc.) and "

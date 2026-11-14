@@ -13,8 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+ROOT = Path(__file__).resolve().parents[3]
 
 TEST_SECRET = "test-app-secret-" + "x" * 40
 TEST_AI_TOKEN = "test-ai-token-" + "y" * 40
@@ -28,9 +27,9 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from app import main as web  # noqa: E402
-from app.db import Base, get_db  # noqa: E402
-from app.models import (  # noqa: E402
+from unisubmit import main as web  # noqa: E402
+from unisubmit.db import Base, get_db  # noqa: E402
+from unisubmit.models import (  # noqa: E402
     AIJob,
     AIProfile,
     AdminUser,
@@ -44,7 +43,7 @@ from app.models import (  # noqa: E402
     Template,
     TemplateVersion,
 )
-from app.security import hash_password  # noqa: E402
+from unisubmit.security import hash_password  # noqa: E402
 
 PASSWORD = "correct horse battery staple"
 

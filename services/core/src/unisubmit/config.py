@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +17,8 @@ class Settings(BaseSettings):
     # Required, no default: shared with the AI service (DEF-029).
     ai_service_token: str
     database_url: str = 'sqlite:///./unisubmit.db'
+    # Uploads and reports. Relative paths resolve against the working directory.
+    storage_dir: Path = Path('storage')
     ai_service_url: str = 'http://127.0.0.1:8001'
     ollama_url: str = 'http://127.0.0.1:11434'
     ollama_model: str = 'qwen3:32b'

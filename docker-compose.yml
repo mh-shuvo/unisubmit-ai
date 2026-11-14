@@ -13,7 +13,7 @@
 # until they are set in .env (DEF-027, DEF-030).
 
 x-app: &app
-  build: .
+  build: { context: ., dockerfile: services/core/Dockerfile }
   volumes:
     # Named volume so it works regardless of Docker Desktop file-sharing
     # settings. Swap for `./storage:/app/storage` to browse uploads on the
@@ -44,13 +44,13 @@ services:
   # Validation jobs run here, one at a time, never in the web process (DEF-024).
   worker:
     <<: *app
-    command: ["python", "-m", "app.worker"]
+    command: ["python", "-m", "unisubmit.worker"]
     # Lets an interrupted job be put back in the queue before the stop (DEF-034).
     stop_grace_period: 30s
 
   ai-service:
     profiles: ["ai"]
-    build: ./ai_service
+    build: { context: ., dockerfile: services/ai/Dockerfile }
     ports:
       - "127.0.0.1:${AI_SERVICE_PORT:-8001}:8001"
     volumes:

@@ -1,0 +1,21 @@
+[project]
+name = "unisubmit-workspace"
+version = "0"
+requires-python = ">=3.13,<3.14"
+
+[tool.uv]
+package = false
+# The embedding stack the existing Qdrant index was built with. Upgrade
+# deliberately and re-index, never as a side effect of `uv lock`.
+constraint-dependencies = [
+  "torch==2.14.1",
+  "transformers==5.20.1",
+  "sentence-transformers==6.1.0",
+  "peft==0.21.2",
+]
+
+[tool.uv.workspace]
+members = ["services/core", "services/ai"]
+
+[dependency-groups]
+dev = ["pytest>=9.2"]

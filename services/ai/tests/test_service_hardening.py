@@ -15,7 +15,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import main as service
+from unisubmit_ai import main as service
 
 TOKEN = "test-ai-token-" + "y" * 40
 AUTH = {"Authorization": f"Bearer {TOKEN}"}

@@ -33,9 +33,9 @@ from support import (
     pdf_bytes,
     web,
 )
-from app.config import settings
-from app.db import Base, get_db
-from app.models import AIJob, AdminUser, Submission, SubmissionVersion, TemplateVersion
+from unisubmit.config import settings
+from unisubmit.db import Base, get_db
+from unisubmit.models import AIJob, AdminUser, Submission, SubmissionVersion, TemplateVersion
 
 
 class WebProcessTests(AppTestCase):
@@ -177,7 +177,7 @@ class ConcurrentUploadTests(unittest.TestCase):
 class WorkerTests(AppTestCase):
     def setUp(self):
         super().setUp()
-        from app import worker
+        from unisubmit import worker
 
         self.worker = worker
         session_patch = patch.object(worker, "SessionLocal", self.Session)
@@ -315,7 +315,7 @@ class AIClientAuthTests(unittest.TestCase):
 
         import httpx
 
-        from app import ai_service_client as client
+        from unisubmit import ai_service_client as client
 
         seen = []
 

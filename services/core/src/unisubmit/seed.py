@@ -1,7 +1,7 @@
 """Bootstrap commands, run deliberately rather than on every web startup.
 
-    python -m app.seed demo-data                 # sample faculty, programs, supervisors
-    python -m app.seed super-admin --email ...   # first Super Admin, password prompted
+    python -m unisubmit.seed demo-data                 # sample faculty, programs, supervisors
+    python -m unisubmit.seed super-admin --email ...   # first Super Admin, password prompted
 
 The web startup used to call `seed()`, which created `admin@unisubmit.local`
 with the password `Admin@123`, published in the README (DEF-028).
@@ -49,7 +49,7 @@ def create_super_admin(db, name: str, email: str, password: str) -> AdminUser:
 def main(argv=None) -> int:
     from .db import Base, SessionLocal, engine
 
-    parser = argparse.ArgumentParser(prog='python -m app.seed', description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog='python -m unisubmit.seed', description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('demo-data', help='create the sample faculty, programs and supervisors')
     admin = commands.add_parser('super-admin', help='create a Super Admin account')

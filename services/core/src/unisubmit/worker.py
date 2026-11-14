@@ -1,6 +1,6 @@
 """Validation queue worker. Runs as its own process:
 
-    python -m app.worker
+    python -m unisubmit.worker
 
 It used to run inside the web process, where the PDF analysis, report
 rendering and SMTP work of every job froze all pages while it ran (DEF-024).

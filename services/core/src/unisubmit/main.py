@@ -43,8 +43,8 @@ from .report_parser import parse_ai_report, inline_markdown_html
 from .emailer import send_submission_email
 from .config import settings
 
-ROOT = Path(__file__).resolve().parent.parent
-STORAGE = ROOT / "storage"
+PACKAGE = Path(__file__).resolve().parent
+STORAGE = settings.storage_dir.resolve()
 TEMPLATE_STORE = STORAGE / "templates"
 SUBMISSION_STORE = STORAGE / "submissions"
 REPORT_STORE = STORAGE / "reports"
@@ -58,15 +58,15 @@ app.add_middleware(
     max_age=60 * 60 * 12,
     same_site="lax",
 )
-app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
-templates = Jinja2Templates(directory=str(ROOT / "app" / "templates"))
+app.mount("/static", StaticFiles(directory=str(PACKAGE / "static")), name="static")
+templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
 templates.env.globals["default_llm_model"] = settings.ollama_model
 
 @app.on_event("startup")
 def startup():
-    # Validation jobs run in a separate process, `python -m app.worker` (DEF-024).
-    # Accounts and demo data come from `python -m app.seed` (DEF-028).
+    # Validation jobs run in a separate process, `python -m unisubmit.worker` (DEF-024).
+    # Accounts and demo data come from `python -m unisubmit.seed` (DEF-028).
     Base.metadata.create_all(bind=engine)
 
 

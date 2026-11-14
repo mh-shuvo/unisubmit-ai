@@ -21,9 +21,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from support import ROOT
-from app.config import Settings
-from app.db import Base
-from app.models import AdminUser, Faculty
+from unisubmit.config import Settings
+from unisubmit.db import Base
+from unisubmit.models import AdminUser, Faculty
 
 STRONG = "a" * 16 + "b" * 16 + "c" * 8
 
@@ -71,7 +71,7 @@ class AdminBootstrapTests(unittest.TestCase):
         self.addCleanup(self.db.close)
 
     def test_demo_data_creates_no_admin_account(self):
-        from app.seed import seed_demo_data
+        from unisubmit.seed import seed_demo_data
 
         seed_demo_data(self.db)
 
@@ -80,14 +80,14 @@ class AdminBootstrapTests(unittest.TestCase):
         )
 
     def test_super_admin_needs_a_strong_password(self):
-        from app.seed import create_super_admin
+        from unisubmit.seed import create_super_admin
 
         with self.assertRaises(ValueError):
             create_super_admin(self.db, "Admin", "admin@example.edu", "Admin@123")
 
     def test_super_admin_is_created_with_the_chosen_password(self):
-        from app.security import verify_password
-        from app.seed import create_super_admin
+        from unisubmit.security import verify_password
+        from unisubmit.seed import create_super_admin
 
         create_super_admin(self.db, "Admin", "Admin@Example.edu", "a long chosen passphrase")
 
@@ -135,7 +135,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_queue_worker_runs_as_its_own_service(self):
         """DEF-024"""
-        self.assertEqual(self.services["worker"]["command"], ["python", "-m", "app.worker"])
+        self.assertEqual(self.services["worker"]["command"], ["python", "-m", "unisubmit.worker"])
 
 
 if __name__ == "__main__":

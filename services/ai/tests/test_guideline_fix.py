@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch, AsyncMock
 
 import httpx
-import main as service
+from unisubmit_ai import main as service
 
 
 class GuidelineFixTests(unittest.TestCase):

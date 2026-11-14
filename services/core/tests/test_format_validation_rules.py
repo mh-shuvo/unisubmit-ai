@@ -20,16 +20,13 @@ And the three defects that made correctly formatted theses fail:
 """
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import fitz
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from app.format_validation import (  # noqa: E402
+from unisubmit.format_validation import (  # noqa: E402
     _find_section,
     _heading_candidates,
     _is_body_text_line,
@@ -42,7 +39,7 @@ from app.format_validation import (  # noqa: E402
     validate_all_profile_rules,
     _to_title_case
 )
-from app.pdf_utils import inspect_pdf  # noqa: E402
+from unisubmit.pdf_utils import inspect_pdf  # noqa: E402
 
 
 def _page(page, **kw):
