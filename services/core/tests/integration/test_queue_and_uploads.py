@@ -20,22 +20,16 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.routing import APIRoute
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import UploadFile
 
-import support  # noqa: F401  sets the test environment before the app is imported
-from support import (
-    TEST_AI_TOKEN,
-    AppTestCase,
-    add_version,
-    build_world,
-    pdf_bytes,
-    web,
-)
+from factories import add_version, build_world, pdf_bytes
+from support import AppTestCase
+from unisubmit import main as web
 from unisubmit.core.config import get_settings
-from unisubmit.core.db import Base, get_session
+from unisubmit.core.db import get_session
 from unisubmit.models import AdminUser, AIJob, Submission, SubmissionVersion
 
 
@@ -116,26 +110,15 @@ class UploadTests(AppTestCase):
         self.assertEqual(self.versions(), [1, 2])
 
 
-@unittest.skipUnless(
-    os.environ.get("TEST_POSTGRES_URL"),
-    "set TEST_POSTGRES_URL to a disposable PostgreSQL database to run",
-)
 class ConcurrentUploadTests(unittest.TestCase):
-    """DEF-026 under real row locking; SQLite cannot express FOR UPDATE."""
+    """DEF-026 and DEF-046: two connections racing on the real row lock."""
+
+    @pytest.fixture(autouse=True)
+    def _database(self, committed_session_factory, tmp_path):
+        self.Session = committed_session_factory
+        self.tmp = tmp_path
 
     def setUp(self):
-        import shutil
-        import tempfile
-        from pathlib import Path
-
-        self.tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.engine = create_engine(os.environ["TEST_POSTGRES_URL"])
-        Base.metadata.drop_all(self.engine)
-        Base.metadata.create_all(self.engine)
-        self.addCleanup(Base.metadata.drop_all, self.engine)
-        self.addCleanup(self.engine.dispose)
-        self.Session = sessionmaker(bind=self.engine, autoflush=False)
         with self.Session() as db:
             self.world = build_world(db, self.tmp)
             add_version(db, self.world.submission_id, self.tmp, "COMPLETED")
@@ -362,7 +345,7 @@ class AIClientAuthTests(unittest.TestCase):
             if inspect.isawaitable(health):
                 asyncio.run(health)
 
-        expected = f"Bearer {TEST_AI_TOKEN}"
+        expected = f"Bearer {os.environ['UNISUBMIT_AI_SERVICE_TOKEN']}"
         self.assertEqual(
             [path for path, auth in seen if auth != expected and path != "/health"], []
         )

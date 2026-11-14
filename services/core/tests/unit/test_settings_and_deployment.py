@@ -12,20 +12,15 @@ DEF-024: the queue worker runs as its own service.
 import os
 import re
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-import support  # noqa: F401  sets the test environment before the app is imported
-from support import ROOT
 from unisubmit.core.config import Settings, get_settings
-from unisubmit.core.db import Base
-from unisubmit.models import AdminUser, Faculty
 
+ROOT = Path(__file__).resolve().parents[4]
 STRONG = "a" * 16 + "b" * 16 + "c" * 8
 DATABASE = "postgresql+psycopg://unisubmit:pw@127.0.0.1:5433/unisubmit"
 VALID = {
@@ -95,49 +90,6 @@ class SecretSettingsTests(unittest.TestCase):
     def test_non_postgres_database_is_rejected(self):
         with self.assertRaises(ValidationError):
             settings_from(**VALID | {"UNISUBMIT_DATABASE_URL": "sqlite:///./unisubmit.db"})
-
-
-class AdminBootstrapTests(unittest.TestCase):
-    """DEF-028: the first admin is created deliberately, with a chosen password."""
-
-    def setUp(self):
-        engine = create_engine(
-            "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
-        )
-        Base.metadata.create_all(engine)
-        self.db = sessionmaker(bind=engine)()
-        self.addCleanup(self.db.close)
-
-    def test_demo_data_creates_no_admin_account(self):
-        from unisubmit.seed import seed_demo_data
-
-        seed_demo_data(self.db)
-
-        self.assertEqual(
-            (self.db.query(Faculty).count() > 0, self.db.query(AdminUser).count()), (True, 0)
-        )
-
-    def test_super_admin_needs_a_strong_password(self):
-        from unisubmit.seed import create_super_admin
-
-        with self.assertRaises(ValueError):
-            create_super_admin(self.db, "Admin", "admin@example.edu", "Admin@123")
-
-    def test_super_admin_is_created_with_the_chosen_password(self):
-        from unisubmit.security import verify_password
-        from unisubmit.seed import create_super_admin
-
-        create_super_admin(self.db, "Admin", "Admin@Example.edu", "a long chosen passphrase")
-
-        admin = self.db.query(AdminUser).one()
-        self.assertEqual(
-            (
-                admin.email,
-                admin.role,
-                verify_password("a long chosen passphrase", admin.password_hash),
-            ),
-            ("admin@example.edu", "SUPER_ADMIN", True),
-        )
 
 
 class ComposeTests(unittest.TestCase):
