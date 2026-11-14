@@ -141,6 +141,19 @@ def _check_qdrant_sync() -> tuple[bool, str]:
         client.get_collections()
         return True, f"server={info.version}  url={QDRANT_URL}"
     except Exception as exc:
+        if "401" in str(exc):
+            # Usually a container created before Qdrant got its API key, or an
+            # ai_service/.env that differs from the root .env.
+            if not os.getenv("QDRANT_API_KEY"):
+                return False, (
+                    f"Qdrant at {QDRANT_URL} requires an API key, but QDRANT_API_KEY is not set. "
+                    "Set it to the QDRANT_API_KEY in the root .env (ai_service/.env when run "
+                    "natively); for an old Docker container, recreate it."
+                )
+            return False, (
+                f"Qdrant at {QDRANT_URL} rejected QDRANT_API_KEY: it differs from the key "
+                "Qdrant was started with (QDRANT_API_KEY in the root .env)."
+            )
         return False, str(exc)
 
 

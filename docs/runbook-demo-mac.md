@@ -111,6 +111,7 @@ DATABASE_URL=postgresql://unisubmit:<password>@127.0.0.1:5433/unisubmit \
 | AI status page: offline, but `/health` works in a browser | `AI_SERVICE_TOKEN` differs between `.env` and `ai_service/.env` (calls get 401) |
 | AI service exits at startup: "Service token" failed | `AI_SERVICE_TOKEN` missing or shorter than 32 characters in `ai_service/.env` |
 | AI service exits at startup: Qdrant failed | Docker is not running, or `QDRANT_API_KEY` differs from `.env` |
+| `ai-service` container exits: "QDRANT_API_KEY is not set" | The container predates v9.14 and was never recreated. `docker compose rm -sf ai-service` and run the AI service natively, or recreate it with `--profile ai` |
 | A job stays "AI validation in progress" | The worker stopped mid-job; it is requeued when the worker restarts after `RAG_VALIDATE_TIMEOUT` + 5 minutes. `docker compose logs worker` says why it stopped |
 | Uploading a revised version says the submission is still being validated | Expected while its job is queued or running ([DEF-026](defects/DEF-026.md)) |
 
