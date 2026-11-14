@@ -1,36 +1,81 @@
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .core.config import get_settings
-from .core.db import Base
+from .core.db import Base, str_enum
+
+
+class AdminRole(StrEnum):
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"  # the whole installation; belongs to no university
+    UNIVERSITY_ADMIN = "UNIVERSITY_ADMIN"  # one university (was SUPER_ADMIN)
+    UNIT_ADMIN = "UNIT_ADMIN"  # one department or institute
+
+
+class University(Base):
+    """A tenant. Every other record belongs to exactly one, directly or via its parent."""
+
+    __tablename__ = "universities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    slug: Mapped[str] = mapped_column(String(60), unique=True)  # /u/{slug}/...
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Faculty(Base):
     __tablename__ = "faculties"
+    __table_args__ = (
+        UniqueConstraint("university_id", "name"),
+        UniqueConstraint("university_id", "code"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(50))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    university = relationship("University")
     departments = relationship("Department", back_populates="faculty")
 
 
 class Institute(Base):
     __tablename__ = "institutes"
+    __table_args__ = (
+        UniqueConstraint("university_id", "name"),
+        UniqueConstraint("university_id", "code"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(50))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    university = relationship("University")
     programs = relationship("Program", back_populates="institute")
     teachers = relationship("Teacher", back_populates="institute")
 
 
 class Department(Base):
     __tablename__ = "departments"
+    # The university comes from the faculty; unique per faculty is unique per university.
+    __table_args__ = (
+        UniqueConstraint("faculty_id", "name"),
+        UniqueConstraint("faculty_id", "code"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(50))
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id"))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     faculty = relationship("Faculty", back_populates="departments")
@@ -71,30 +116,40 @@ class Program(Base):
 
 class AdminUser(Base):
     __tablename__ = "admin_users"
+    __table_args__ = (
+        # Only a Platform Admin stands outside every university.
+        CheckConstraint(
+            "(role = 'PLATFORM_ADMIN') = (university_id IS NULL)", name="university_matches_role"
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int | None] = mapped_column(
+        ForeignKey("universities.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(180))
+    # Login emails stay unique across the installation: no university picker at login.
     email: Mapped[str] = mapped_column(String(200), unique=True)
     password_hash: Mapped[str] = mapped_column(String(300))
-    role: Mapped[str] = mapped_column(String(40), default="UNIT_ADMIN")
+    role: Mapped[AdminRole] = mapped_column(str_enum(AdminRole), default=AdminRole.UNIT_ADMIN)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    university = relationship("University")
     department = relationship("Department")
     institute = relationship("Institute")
 
     @property
     def unit_name(self):
-        return (
-            self.department.name
-            if self.department
-            else (self.institute.name if self.institute else "Global")
-        )
+        if self.department or self.institute:
+            return self.department.name if self.department else self.institute.name
+        return self.university.name if self.university else "Platform"
 
 
 class StudentUser(Base):
     __tablename__ = "student_users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"), index=True)
     name: Mapped[str] = mapped_column(String(180))
     student_id: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(200), unique=True)
@@ -104,6 +159,7 @@ class StudentUser(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    university = relationship("University")
     department = relationship("Department")
     institute = relationship("Institute")
 
@@ -126,10 +182,13 @@ class StudentUser(Base):
 
 class Teacher(Base):
     __tablename__ = "teachers"
+    # A directory entry, not a login: one supervisor may appear in two universities (DEF-043).
+    __table_args__ = (UniqueConstraint("university_id", "email"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     designation: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(200), unique=True)
+    email: Mapped[str] = mapped_column(String(200))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
@@ -222,6 +281,7 @@ class AIProfile(Base):
 class Submission(Base):
     __tablename__ = "submissions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"), index=True)
     student_user_id: Mapped[int] = mapped_column(ForeignKey("student_users.id"))
     title: Mapped[str] = mapped_column(String(400))
     program_id: Mapped[int] = mapped_column(ForeignKey("programs.id"))

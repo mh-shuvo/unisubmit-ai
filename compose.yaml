@@ -40,12 +40,16 @@ x-core: &core
 
 services:
   # Brings the schema up to date before the app and worker start; neither
-  # creates tables itself (DEF-039, DEF-045). Runs as root once, to hand a
-  # storage volume written by the root-run v9 containers to the `app` user.
+  # creates tables itself (DEF-039, DEF-045). Then moves files uploaded before
+  # v10 into per-university folders (DEF-042; a no-op once done). Runs as root,
+  # to hand a volume written by the root-run v9 containers to the `app` user.
   migrate:
     <<: *core
     user: root
-    command: ["sh", "-c", "chown -R app:app /app/storage && exec unisubmit migrate"]
+    command:
+      - sh
+      - -c
+      - unisubmit migrate && unisubmit relocate-files && chown -R app:app /app/storage
     restart: "no"
     depends_on:
       db:

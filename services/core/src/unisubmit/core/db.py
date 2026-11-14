@@ -5,6 +5,7 @@ would gain nothing, and templates rely on lazy loading.
 """
 
 from collections.abc import Iterator
+from enum import StrEnum
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -23,6 +24,18 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = sa.MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def str_enum(enum_cls: type[StrEnum]) -> sa.Enum:
+    """VARCHAR plus a CHECK constraint: as safe as a native enum, far easier to migrate."""
+    return sa.Enum(
+        enum_cls,
+        name=enum_cls.__name__.lower(),
+        native_enum=False,
+        create_constraint=True,
+        length=40,
+        values_callable=lambda members: [member.value for member in members],
+    )
 
 
 def create_db_engine(url: str) -> sa.Engine:

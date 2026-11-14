@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import queries, storage, tenancy
 from .ai_service_client import (
     health as ai_health,
 )
@@ -28,6 +29,7 @@ from .core.db import DbSession, create_db_engine, make_session_factory
 from .emailer import send_submission_email
 from .format_validation import validate_all_profile_rules
 from .models import (
+    AdminRole,
     AdminUser,
     AIJob,
     AIProfile,
@@ -41,6 +43,7 @@ from .models import (
     Teacher,
     Template,
     TemplateVersion,
+    University,
     ValidationRule,
 )
 from .pdf_utils import PDFError, inspect_pdf
@@ -53,13 +56,6 @@ PACKAGE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
 router = APIRouter()
-
-
-def store(name: str) -> Path:
-    """`templates`, `submissions` or `reports` under the storage root."""
-    path = get_settings().storage_dir.resolve() / name
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 # ---------- helpers ----------
@@ -249,47 +245,34 @@ def student_user(request: Request, db: Session):
     return db.get(StudentUser, uid) if uid else None
 
 
+def university_inactive(user) -> bool:
+    """Deactivating a university signs out all its users on their next request (P2.6)."""
+    return user.university is not None and not user.university.is_active
+
+
 def require_admin(request: Request, db: Session):
     u = admin_user(request, db)
-    if not u or not u.active:
+    if u and university_inactive(u):
+        request.session.clear()
+    if not u or not u.active or university_inactive(u):
         raise HTTPException(401, "Admin login required")
     return u
 
 
-def require_super(request: Request, db: Session):
+def require_role(request: Request, db: Session, role: AdminRole):
     u = require_admin(request, db)
-    if u.role != "SUPER_ADMIN":
-        raise HTTPException(403, "Super Admin access required")
+    if u.role != role:
+        raise HTTPException(403, f"{role.replace('_', ' ').title()} access required")
     return u
 
 
 def require_student(request: Request, db: Session):
     u = student_user(request, db)
-    if not u or not u.active:
+    if u and university_inactive(u):
+        request.session.clear()
+    if not u or not u.active or university_inactive(u):
         raise HTTPException(401, "Student login required")
     return u
-
-
-def unit_programs(db, u):
-    q = db.query(Program).filter(Program.active == True)
-    if getattr(u, "department_id", None):
-        q = q.filter(Program.department_id == u.department_id)
-    elif getattr(u, "institute_id", None):
-        q = q.filter(Program.institute_id == u.institute_id)
-    else:
-        return []
-    return q.order_by(Program.name).all()
-
-
-def unit_teachers(db, u):
-    q = db.query(Teacher).filter(Teacher.active == True)
-    if getattr(u, "department_id", None):
-        q = q.filter(Teacher.department_id == u.department_id)
-    elif getattr(u, "institute_id", None):
-        q = q.filter(Teacher.institute_id == u.institute_id)
-    else:
-        return []
-    return q.order_by(Teacher.name).all()
 
 
 def same_unit(program, u):
@@ -304,12 +287,7 @@ def home(request: Request, db: DbSession):
     return templates.TemplateResponse(
         request,
         "home.html",
-        {
-            "request": request,
-            "faculties": db.query(Faculty).count(),
-            "departments": db.query(Department).count(),
-            "institutes": db.query(Institute).count(),
-        },
+        {"request": request, "universities": tenancy.active_universities(db)},
     )
 
 
@@ -318,48 +296,82 @@ def how_it_works(request: Request):
     return templates.TemplateResponse(request, "how_it_works.html", {"request": request})
 
 
-@router.get("/guidelines", response_class=HTMLResponse)
-def guidelines(request: Request, db: DbSession):
-    versions = (
-        db.query(TemplateVersion)
-        .filter(TemplateVersion.status == "Active")
-        .order_by(TemplateVersion.created_at.desc())
-        .all()
-    )
+def university_page(db: Session, slug: str) -> University:
+    university = tenancy.active_university(db, slug)
+    if university is None:
+        raise HTTPException(404)
+    return university
+
+
+def to_university_page(db: Session, page: str) -> RedirectResponse:
+    """Pre-v10 public URLs: straight to the page when there is one university,
+    otherwise to the home page, which lists them (P2.7)."""
+    universities = tenancy.active_universities(db)
+    if len(universities) == 1:
+        return RedirectResponse(f"/u/{universities[0].slug}/{page}", 303)
+    return RedirectResponse("/#universities", 303)
+
+
+@router.get("/guidelines")
+def guidelines_redirect(db: DbSession):
+    return to_university_page(db, "guidelines")
+
+
+@router.get("/student/register")
+def student_register_redirect(db: DbSession):
+    return to_university_page(db, "register")
+
+
+@router.get("/u/{slug}/guidelines", response_class=HTMLResponse)
+def guidelines(slug: str, request: Request, db: DbSession):
+    university = university_page(db, slug)
     return templates.TemplateResponse(
-        request, "guidelines.html", {"request": request, "versions": versions}
+        request,
+        "guidelines.html",
+        {
+            "request": request,
+            "university": university,
+            "versions": queries.active_guidelines(db, university.id),
+        },
     )
 
 
 @router.get("/guidelines/{version_id}/download")
 def guideline_download(version_id: int, db: DbSession):
     tv = db.get(TemplateVersion, version_id)
-    if not tv:
+    if not tv or tv.status != "Active":
         raise HTTPException(404)
+    try:
+        path = storage.resolve(tv.pdf_path)
+    except FileNotFoundError:
+        raise HTTPException(404) from None
     return FileResponse(
-        tv.pdf_path,
+        path,
         media_type="application/pdf",
         filename=f"{tv.template.program.code}_{tv.template.submission_type}_{tv.version}.pdf",
     )
 
 
 # ---------- student auth ----------
-@router.get("/student/register", response_class=HTMLResponse)
-def student_register_page(request: Request, db: DbSession):
+@router.get("/u/{slug}/register", response_class=HTMLResponse)
+def student_register_page(slug: str, request: Request, db: DbSession):
+    university = university_page(db, slug)
     return templates.TemplateResponse(
         request,
         "student_register.html",
         {
             "request": request,
-            "departments": db.query(Department).filter(Department.active == True).all(),
-            "institutes": db.query(Institute).filter(Institute.active == True).all(),
+            "university": university,
+            "departments": queries.departments(db, university.id, active_only=True),
+            "institutes": queries.institutes(db, university.id, active_only=True),
             "error": request.query_params.get("error", ""),
         },
     )
 
 
-@router.post("/student/register")
+@router.post("/u/{slug}/register")
 def student_register(
+    slug: str,
     request: Request,
     db: DbSession,
     name: str = Form(...),
@@ -369,23 +381,29 @@ def student_register(
     unit_type: str = Form(...),
     unit_id: int = Form(...),
 ):
+    university = university_page(db, slug)
     if db.query(StudentUser).filter(StudentUser.email == email.strip().lower()).first():
         return RedirectResponse(
-            flash_url("/student/register", error="Email already registered"), 303
+            flash_url(f"/u/{slug}/register", error="Email already registered"), 303
         )
-    dep_id = unit_id if unit_type == "department" else None
-    inst_id = unit_id if unit_type == "institute" else None
-    if unit_type == "department" and not db.get(Department, unit_id):
-        raise HTTPException(400)
-    if unit_type == "institute" and not db.get(Institute, unit_id):
+    # Only units of this university: the id comes from the form (P2.8).
+    units = (
+        queries.departments(db, university.id, active_only=True)
+        if unit_type == "department"
+        else queries.institutes(db, university.id, active_only=True)
+        if unit_type == "institute"
+        else []
+    )
+    if unit_id not in {unit.id for unit in units}:
         raise HTTPException(400)
     s = StudentUser(
         name=name.strip(),
         student_id=student_id.strip(),
         email=email.strip().lower(),
         password_hash=hash_password(password),
-        department_id=dep_id,
-        institute_id=inst_id,
+        university_id=university.id,
+        department_id=unit_id if unit_type == "department" else None,
+        institute_id=unit_id if unit_type == "institute" else None,
         verified=True,
     )
     db.add(s)
@@ -418,6 +436,10 @@ def student_login(
     )
     if not s or not verify_password(password, s.password_hash):
         return RedirectResponse(flash_url("/student/login", error="Invalid email or password"), 303)
+    if university_inactive(s):
+        return RedirectResponse(
+            flash_url("/student/login", error="Your university's account is deactivated"), 303
+        )
     request.session.clear()
     request.session["student_id"] = s.id
     return RedirectResponse("/student/dashboard", 303)
@@ -483,6 +505,10 @@ def admin_login(
     )
     if not u or not verify_password(password, u.password_hash):
         return RedirectResponse(flash_url("/admin/login", error="Invalid admin credentials"), 303)
+    if university_inactive(u):
+        return RedirectResponse(
+            flash_url("/admin/login", error="Your university's account is deactivated"), 303
+        )
     request.session.clear()
     request.session["admin_id"] = u.id
     return RedirectResponse("/admin", 303)
@@ -497,27 +523,27 @@ def admin_logout(request: Request):
 @router.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, db: DbSession):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
+    if u.role == AdminRole.PLATFORM_ADMIN:
+        universities = db.query(University).all()
         metrics = {
-            "faculties": db.query(Faculty).count(),
-            "departments": db.query(Department).count(),
-            "institutes": db.query(Institute).count(),
-            "admins": db.query(AdminUser).filter(AdminUser.role == "UNIT_ADMIN").count(),
+            "universities": len(universities),
+            "active": sum(1 for x in universities if x.is_active),
+            "admins": db.query(AdminUser)
+            .filter(AdminUser.role == AdminRole.UNIVERSITY_ADMIN)
+            .count(),
+        }
+    elif u.role == AdminRole.UNIVERSITY_ADMIN:
+        metrics = {
+            "faculties": len(queries.faculties(db, u.university_id)),
+            "departments": len(queries.departments(db, u.university_id)),
+            "institutes": len(queries.institutes(db, u.university_id)),
+            "admins": len(queries.unit_admins(db, u.university_id)),
         }
     else:
-        programs = unit_programs(db, u)
-        teachers = unit_teachers(db, u)
-        q = db.query(Submission)
-        q = q.join(Program)
-        q = (
-            q.filter(Program.department_id == u.department_id)
-            if u.department_id
-            else q.filter(Program.institute_id == u.institute_id)
-        )
-        rows = q.all()
+        rows = queries.unit_submissions(db, u)
         metrics = {
-            "programs": len(programs),
-            "supervisors": len(teachers),
+            "programs": len(queries.unit_programs(db, u)),
+            "supervisors": len(queries.unit_teachers(db, u)),
             "submissions": len(rows),
             "queue": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
         }
@@ -526,19 +552,111 @@ def admin_dashboard(request: Request, db: DbSession):
     )
 
 
-# ---------- super admin ----------
+# ---------- platform admin ----------
+@router.get("/platform/universities", response_class=HTMLResponse)
+def platform_universities(request: Request, db: DbSession):
+    u = require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    return templates.TemplateResponse(
+        request,
+        "platform_universities.html",
+        {
+            "request": request,
+            "admin": u,
+            "universities": db.query(University).order_by(University.name).all(),
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
+    )
+
+
+@router.post("/platform/universities")
+def platform_create_university(
+    request: Request,
+    db: DbSession,
+    name: str = Form(...),
+    slug: str = Form(...),
+    admin_name: str = Form(...),
+    admin_email: str = Form(...),
+    admin_password: str = Form(...),
+):
+    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    try:
+        tenancy.create_university(
+            db,
+            name,
+            slug,
+            admin_name=admin_name,
+            admin_email=admin_email,
+            admin_password=admin_password,
+        )
+    except tenancy.TenancyError as exc:
+        db.rollback()
+        return RedirectResponse(flash_url("/platform/universities", error=str(exc)), 303)
+    return RedirectResponse(
+        flash_url("/platform/universities", message="University and its admin created"), 303
+    )
+
+
+@router.post("/platform/universities/{university_id}/rename")
+def platform_rename_university(
+    university_id: int,
+    request: Request,
+    db: DbSession,
+    name: str = Form(...),
+    slug: str = Form(...),
+):
+    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    try:
+        tenancy.rename_university(db, university_id, name, slug)
+    except tenancy.TenancyError as exc:
+        db.rollback()
+        return RedirectResponse(flash_url("/platform/universities", error=str(exc)), 303)
+    return RedirectResponse(flash_url("/platform/universities", message="University renamed"), 303)
+
+
+@router.post("/platform/universities/{university_id}/active")
+def platform_set_university_active(
+    university_id: int,
+    request: Request,
+    db: DbSession,
+    active: bool = Form(...),
+):
+    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    try:
+        university = tenancy.set_university_active(db, university_id, active)
+    except tenancy.TenancyError as exc:
+        return RedirectResponse(flash_url("/platform/universities", error=str(exc)), 303)
+    state = "activated" if university.is_active else "deactivated; its users are signed out"
+    return RedirectResponse(
+        flash_url("/platform/universities", message=f"{university.name} {state}"), 303
+    )
+
+
+@router.get("/admin/ai", response_class=HTMLResponse)
+def super_ai(request: Request, db: DbSession):
+    u = require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    status = ai_health(get_settings().ai_service_url)
+    profiles = db.query(AIProfile).all()
+    return templates.TemplateResponse(
+        request,
+        "super_ai.html",
+        {"request": request, "admin": u, "status": status, "profiles": profiles},
+    )
+
+
+# ---------- university admin ----------
 @router.get("/admin/structure", response_class=HTMLResponse)
 def super_structure(request: Request, db: DbSession):
-    u = require_super(request, db)
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
     return templates.TemplateResponse(
         request,
         "super_structure.html",
         {
             "request": request,
             "admin": u,
-            "faculties": db.query(Faculty).all(),
-            "departments": db.query(Department).all(),
-            "institutes": db.query(Institute).all(),
+            "faculties": queries.faculties(db, u.university_id),
+            "departments": queries.departments(db, u.university_id),
+            "institutes": queries.institutes(db, u.university_id),
             "message": request.query_params.get("message", ""),
             "error": request.query_params.get("error", ""),
         },
@@ -552,8 +670,8 @@ def add_faculty(
     name: str = Form(...),
     code: str = Form(...),
 ):
-    require_super(request, db)
-    db.add(Faculty(name=name.strip(), code=code.strip().upper()))
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
+    db.add(Faculty(name=name.strip(), code=code.strip().upper(), university_id=u.university_id))
     try:
         db.commit()
     except Exception:
@@ -571,8 +689,8 @@ def add_institute(
     name: str = Form(...),
     code: str = Form(...),
 ):
-    require_super(request, db)
-    db.add(Institute(name=name.strip(), code=code.strip().upper()))
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
+    db.add(Institute(name=name.strip(), code=code.strip().upper(), university_id=u.university_id))
     try:
         db.commit()
     except Exception:
@@ -592,8 +710,11 @@ def add_department(
     name: str = Form(...),
     code: str = Form(...),
 ):
-    require_super(request, db)
-    db.add(Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty_id))
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
+    faculty = db.get(Faculty, faculty_id)
+    if not faculty or faculty.university_id != u.university_id:
+        raise HTTPException(404)
+    db.add(Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty.id))
     try:
         db.commit()
     except Exception:
@@ -607,16 +728,16 @@ def add_department(
 
 @router.get("/admin/admins", response_class=HTMLResponse)
 def admin_accounts(request: Request, db: DbSession):
-    u = require_super(request, db)
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
     return templates.TemplateResponse(
         request,
         "super_admins.html",
         {
             "request": request,
             "admin": u,
-            "admins": db.query(AdminUser).filter(AdminUser.role == "UNIT_ADMIN").all(),
-            "departments": db.query(Department).filter(Department.active == True).all(),
-            "institutes": db.query(Institute).filter(Institute.active == True).all(),
+            "admins": queries.unit_admins(db, u.university_id),
+            "departments": queries.departments(db, u.university_id, active_only=True),
+            "institutes": queries.institutes(db, u.university_id, active_only=True),
             "message": request.query_params.get("message", ""),
             "error": request.query_params.get("error", ""),
         },
@@ -633,17 +754,25 @@ def create_unit_admin(
     unit_type: str = Form(...),
     unit_id: int = Form(...),
 ):
-    require_super(request, db)
-    dep = unit_id if unit_type == "department" else None
-    inst = unit_id if unit_type == "institute" else None
+    u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
+    units = (
+        queries.departments(db, u.university_id)
+        if unit_type == "department"
+        else queries.institutes(db, u.university_id)
+        if unit_type == "institute"
+        else []
+    )
+    if unit_id not in {unit.id for unit in units}:
+        raise HTTPException(404)
     db.add(
         AdminUser(
             name=name.strip(),
             email=email.strip().lower(),
             password_hash=hash_password(password),
-            role="UNIT_ADMIN",
-            department_id=dep,
-            institute_id=inst,
+            role=AdminRole.UNIT_ADMIN,
+            university_id=u.university_id,
+            department_id=unit_id if unit_type == "department" else None,
+            institute_id=unit_id if unit_type == "institute" else None,
         )
     )
     try:
@@ -656,23 +785,11 @@ def create_unit_admin(
     )
 
 
-@router.get("/admin/ai", response_class=HTMLResponse)
-def super_ai(request: Request, db: DbSession):
-    u = require_super(request, db)
-    status = ai_health(get_settings().ai_service_url)
-    profiles = db.query(AIProfile).all()
-    return templates.TemplateResponse(
-        request,
-        "super_ai.html",
-        {"request": request, "admin": u, "status": status, "profiles": profiles},
-    )
-
-
 # ---------- unit admin ----------
 @router.get("/admin/programs", response_class=HTMLResponse)
 def unit_program_page(request: Request, db: DbSession):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
+    if u.role != AdminRole.UNIT_ADMIN:
         raise HTTPException(403)
     return templates.TemplateResponse(
         request,
@@ -680,7 +797,7 @@ def unit_program_page(request: Request, db: DbSession):
         {
             "request": request,
             "admin": u,
-            "programs": unit_programs(db, u),
+            "programs": queries.unit_programs(db, u),
             "message": request.query_params.get("message", ""),
         },
     )
@@ -695,7 +812,7 @@ def unit_add_program(
     level: str = Form(...),
 ):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
+    if u.role != AdminRole.UNIT_ADMIN:
         raise HTTPException(403)
     db.add(
         Program(
@@ -713,7 +830,7 @@ def unit_add_program(
 @router.get("/admin/supervisors", response_class=HTMLResponse)
 def unit_supervisors(request: Request, db: DbSession):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
+    if u.role != AdminRole.UNIT_ADMIN:
         raise HTTPException(403)
     return templates.TemplateResponse(
         request,
@@ -721,7 +838,7 @@ def unit_supervisors(request: Request, db: DbSession):
         {
             "request": request,
             "admin": u,
-            "teachers": unit_teachers(db, u),
+            "teachers": queries.unit_teachers(db, u),
             "message": request.query_params.get("message", ""),
             "error": request.query_params.get("error", ""),
         },
@@ -737,7 +854,7 @@ def unit_add_supervisor(
     email: str = Form(...),
 ):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
+    if u.role != AdminRole.UNIT_ADMIN:
         raise HTTPException(403)
     allowed = {"Professor", "Associate Professor", "Assistant Professor", "Lecturer"}
     if designation not in allowed:
@@ -747,6 +864,7 @@ def unit_add_supervisor(
             name=name.strip(),
             designation=designation,
             email=email.strip().lower(),
+            university_id=u.university_id,
             department_id=u.department_id,
             institute_id=u.institute_id,
         )
@@ -762,9 +880,9 @@ def unit_add_supervisor(
 @router.get("/admin/configuration", response_class=HTMLResponse)
 def unit_configuration(request: Request, db: DbSession):
     u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
-        return HTTPException(403)
-    programs = unit_programs(db, u)
+    if u.role != AdminRole.UNIT_ADMIN:
+        raise HTTPException(403)
+    programs = queries.unit_programs(db, u)
     ids = [p.id for p in programs]
     configs = db.query(Template).filter(Template.program_id.in_(ids)).all() if ids else []
     return templates.TemplateResponse(
@@ -791,7 +909,7 @@ def add_configuration(
 ):
     u = require_admin(request, db)
     p = db.get(Program, program_id)
-    if u.role == "SUPER_ADMIN" or not p or not same_unit(p, u):
+    if u.role != AdminRole.UNIT_ADMIN or not p or not same_unit(p, u):
         raise HTTPException(403)
     t = (
         db.query(Template)
@@ -829,13 +947,13 @@ def add_version(
 ):
     u = require_admin(request, db)
     t = db.get(Template, template_id)
-    if u.role == "SUPER_ADMIN" or not t or not same_unit(t.program, u):
+    if u.role != AdminRole.UNIT_ADMIN or not t or not same_unit(t.program, u):
         raise HTTPException(403)
     if not pdf.filename.lower().endswith(".pdf"):
         return RedirectResponse(
             flash_url("/admin/configuration", error="Guideline must be PDF"), 303
         )
-    dest = store("templates") / f"guideline_{uuid.uuid4().hex}.pdf"
+    dest = storage.directory(u.university_id, "guidelines") / f"guideline_{uuid.uuid4().hex}.pdf"
     with dest.open("wb") as f:
         shutil.copyfileobj(pdf.file, f)
     try:
@@ -854,12 +972,12 @@ def add_version(
                 ),
                 303,
             )
-        ad = store("templates") / f"additional_{uuid.uuid4().hex}.pdf"
+        ad = storage.directory(u.university_id, "guidelines") / f"additional_{uuid.uuid4().hex}.pdf"
         with ad.open("wb") as f:
             shutil.copyfileobj(additional_rules_pdf.file, f)
         try:
             ai = inspect_pdf(str(ad))
-            add_path = str(ad)
+            add_path = storage.relative(ad)
             add_text = ai["text"]
         except PDFError:
             ad.unlink(missing_ok=True)
@@ -869,7 +987,7 @@ def add_version(
         effective_from=effective_from,
         status=status,
         change_note=change_note,
-        pdf_path=str(dest),
+        pdf_path=storage.relative(dest),
         extracted_text=info["text"],
         additional_rules_pdf_path=add_path,
         additional_rules_text=add_text,
@@ -897,7 +1015,7 @@ def add_version(
 def template_version_page(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     try:
         parsed_profile = json.loads(tv.format_profile_json or "{}")
@@ -932,7 +1050,7 @@ def review_guideline_rules(
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     try:
         profile = json.loads(tv.format_profile_json or "{}")
@@ -1014,7 +1132,7 @@ def add_manual_semantic_rule(
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     requirement = requirement.strip()
     target_section = target_section.strip()
@@ -1082,7 +1200,7 @@ def update_manual_semantic_rule(
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     try:
         profile = json.loads(tv.format_profile_json or "{}")
@@ -1136,7 +1254,7 @@ def update_manual_semantic_rule(
 def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     try:
         profile = json.loads(tv.format_profile_json or "{}")
@@ -1170,7 +1288,7 @@ def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Requ
 def activate_guideline_profile(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     try:
         profile = json.loads(tv.format_profile_json or "{}")
@@ -1219,7 +1337,7 @@ def add_restriction(
 ):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     db.add(
         ValidationRule(
@@ -1247,7 +1365,7 @@ def add_restriction(
 async def index_guideline(version_id: int, request: Request, db: DbSession):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
-    if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
+    if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
     p = tv.template.program
 
@@ -1277,7 +1395,7 @@ async def index_guideline(version_id: int, request: Request, db: DbSession):
         "base_model": profile.base_model,
     }
     parsed_profile = await parse_guideline_profile(
-        get_settings().ai_service_url, parse_fields, tv.pdf_path
+        get_settings().ai_service_url, parse_fields, str(storage.resolve(tv.pdf_path))
     )
     if parsed_profile.get("status") != "success":
         tv.format_profile_json = "{}"
@@ -1328,14 +1446,20 @@ async def index_guideline(version_id: int, request: Request, db: DbSession):
         "template_version": tv.version,
         # Named by id: display names are not unique and slugify alike (DEF-032).
         "collection": f"tv_{tv.id}",
+        # Stored in every point's payload, for auditing which tenant owns it (P2.10).
+        "university_id": str(u.university_id),
         "recreate": "true",
     }
-    result = await index_template(get_settings().ai_service_url, fields, tv.pdf_path)
+    result = await index_template(
+        get_settings().ai_service_url, fields, str(storage.resolve(tv.pdf_path))
+    )
     if result.get("status") == "success" and tv.additional_rules_pdf_path:
         extra_fields = dict(fields)
         extra_fields["recreate"] = "false"
         extra_result = await index_template(
-            get_settings().ai_service_url, extra_fields, tv.additional_rules_pdf_path
+            get_settings().ai_service_url,
+            extra_fields,
+            str(storage.resolve(tv.additional_rules_pdf_path)),
         )
         if extra_result.get("status") != "success":
             result = {
@@ -1370,35 +1494,21 @@ async def index_guideline(version_id: int, request: Request, db: DbSession):
 
 @router.get("/admin/submissions", response_class=HTMLResponse)
 def unit_submissions(request: Request, db: DbSession):
-    u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
-        raise HTTPException(403)
-    q = db.query(Submission).join(Program)
-    q = (
-        q.filter(Program.department_id == u.department_id)
-        if u.department_id
-        else q.filter(Program.institute_id == u.institute_id)
-    )
-    rows = q.order_by(Submission.created_at.desc()).all()
+    u = require_role(request, db, AdminRole.UNIT_ADMIN)
     return templates.TemplateResponse(
-        request, "unit_submissions.html", {"request": request, "admin": u, "rows": rows}
+        request,
+        "unit_submissions.html",
+        {"request": request, "admin": u, "rows": queries.unit_submissions(db, u)},
     )
 
 
 @router.get("/admin/queue", response_class=HTMLResponse)
 def unit_queue(request: Request, db: DbSession):
-    u = require_admin(request, db)
-    if u.role == "SUPER_ADMIN":
-        raise HTTPException(403)
-    jobs = db.query(AIJob).join(SubmissionVersion).join(Submission).join(Program)
-    jobs = (
-        jobs.filter(Program.department_id == u.department_id)
-        if u.department_id
-        else jobs.filter(Program.institute_id == u.institute_id)
-    )
-    jobs = jobs.order_by(AIJob.created_at.desc()).all()
+    u = require_role(request, db, AdminRole.UNIT_ADMIN)
     return templates.TemplateResponse(
-        request, "unit_queue.html", {"request": request, "admin": u, "jobs": jobs}
+        request,
+        "unit_queue.html",
+        {"request": request, "admin": u, "jobs": queries.unit_jobs(db, u)},
     )
 
 
@@ -1420,7 +1530,7 @@ def student_options(program_id: int, request: Request, db: DbSession):
     p = db.get(Program, program_id)
     if not p or not same_unit(p, s):
         raise HTTPException(403)
-    teachers = unit_teachers(db, s)
+    teachers = queries.unit_teachers(db, s)
     versions = []
     for t in p.templates:
         for v in t.versions:
@@ -1449,7 +1559,7 @@ def submit_form(request: Request, db: DbSession):
     return templates.TemplateResponse(
         request,
         "submit.html",
-        {"request": request, "student": s, "programs": unit_programs(db, s)},
+        {"request": request, "student": s, "programs": queries.unit_programs(db, s)},
     )
 
 
@@ -1469,6 +1579,8 @@ def submit(
     tv = db.get(TemplateVersion, template_version_id)
     if not p or not same_unit(p, s) or not teacher or not tv or tv.template.program_id != p.id:
         raise HTTPException(400, "Invalid selection")
+    if teacher.university_id != s.university_id:
+        raise HTTPException(403)
     if s.department_id and teacher.department_id != s.department_id:
         raise HTTPException(403)
     if s.institute_id and teacher.institute_id != s.institute_id:
@@ -1483,6 +1595,7 @@ def submit(
         .first()
     )
     sub = Submission(
+        university_id=s.university_id,
         student_user_id=s.id,
         title=title.strip(),
         program_id=p.id,
@@ -1552,7 +1665,10 @@ def save_queue_version(sub, pdf, db):
         .scalar()
         or 0
     ) + 1
-    dest = store("submissions") / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
+    dest = (
+        storage.directory(sub.university_id, "submissions")
+        / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
+    )
     with dest.open("wb") as f:
         shutil.copyfileobj(pdf.file, f)
     try:
@@ -1563,7 +1679,7 @@ def save_queue_version(sub, pdf, db):
     sv = SubmissionVersion(
         submission_id=sub.id,
         version_no=version_no,
-        pdf_path=str(dest),
+        pdf_path=storage.relative(dest),
         extracted_text=info["text"],
         status="QUEUED",
     )
@@ -1607,10 +1723,12 @@ def download_submission(version_id: int, request: Request, db: DbSession):
     v = db.get(SubmissionVersion, version_id)
     if not v or v.submission.student_user_id != s.id:
         raise HTTPException(404)
+    try:
+        path = storage.resolve(v.pdf_path)
+    except FileNotFoundError:
+        raise HTTPException(404) from None
     return FileResponse(
-        v.pdf_path,
-        media_type="application/pdf",
-        filename=f"submission_v{v.version_no}.pdf",
+        path, media_type="application/pdf", filename=f"submission_v{v.version_no}.pdf"
     )
 
 
@@ -1694,12 +1812,12 @@ def download_report_bound(
         )
     results = json.loads(v.validation_json or "[]")
     report = (
-        store("reports")
+        storage.directory(v.submission.university_id, "reports")
         / f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
     )
     build_validation_report(str(report), v.submission, v, results, v.ai_suggestions or "")
-    if v.report_path != str(report):
-        v.report_path = str(report)
+    if v.report_path != storage.relative(report):
+        v.report_path = storage.relative(report)
         db.commit()
     headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -1742,7 +1860,7 @@ async def process_job(db, job):
     sv = job.submission_version
     sub = sv.submission
     tv = sub.template_version
-    info = inspect_pdf(sv.pdf_path)
+    info = inspect_pdf(str(storage.resolve(sv.pdf_path)))
     results, det_status = run_rules(tv.rules, info)
     try:
         fmt_profile = json.loads(tv.format_profile_json or "{}")
@@ -1791,9 +1909,12 @@ async def process_job(db, job):
     sv.status = final_status
     sub.status = final_status
     run_token = _report_run_token(sv)
-    report = store("reports") / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
+    report = (
+        storage.directory(sub.university_id, "reports")
+        / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
+    )
     build_validation_report(str(report), sub, sv, results, ai_text)
-    sv.report_path = str(report)
+    sv.report_path = storage.relative(report)
     db.commit()
     if final_status == "PASSED":
         body = f"Student: {sub.student.name}\nStudent ID: {sub.student.student_id}\nProgram: {sub.program.name}\nSubmission: {tv.template.submission_type}\nTitle: {sub.title}\nTemplate Version: {tv.version}\nPre-Submission Validation: PASSED\nSubmission Version: {sv.version_no}\n\nThis is a pre-submission compliance check only and does not constitute academic approval."
@@ -1801,7 +1922,7 @@ async def process_job(db, job):
             sub.teacher.email,
             f"Validated {tv.template.submission_type} Submission - {sub.student.name}",
             body,
-            [sv.pdf_path, str(report)],
+            [str(storage.resolve(sv.pdf_path)), str(report)],
         )
         sub.email_status = "Sent" if ok else "Failed / SMTP not configured"
         if ok:

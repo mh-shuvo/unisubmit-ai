@@ -104,11 +104,12 @@ type = "independence"
 modules = ["unisubmit", "unisubmit_ai"]
 
 [[tool.importlinter.contracts]]
-name = "Core layers: entry points, then pages, then models, then core"
+name = "Core layers: entry points, pages, tenancy and storage, models, core"
 type = "layers"
 layers = [
   "unisubmit.cli : unisubmit.worker",
   "unisubmit.main : unisubmit.seed",
+  "unisubmit.tenancy : unisubmit.queries : unisubmit.storage",
   "unisubmit.models",
   "unisubmit.core",
 ]

@@ -636,6 +636,8 @@ async def index_template(
     template_version: str = Form(...),
     recreate: bool = Form(True),
     collection: str | None = Form(None),
+    # Recorded in every point's payload, so an index can be traced to its tenant.
+    university_id: int | None = Form(None),
     pdf: UploadFile = File(...),
 ):
     if not pdf.filename.lower().endswith(".pdf"):
@@ -683,6 +685,7 @@ async def index_template(
                         "program": program,
                         "submission_type": submission_type,
                         "template_version": template_version,
+                        "university_id": university_id,
                         "source_file": pdf.filename,
                     }
                 )

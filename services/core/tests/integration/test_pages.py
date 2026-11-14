@@ -4,13 +4,13 @@ from unittest.mock import patch
 
 from support import AppTestCase
 from unisubmit import main as web
-from unisubmit.seed import create_super_admin
+from unisubmit.tenancy import create_platform_admin
 
 PUBLIC = [
     "/",
     "/how-it-works",
-    "/guidelines",
-    "/student/register",
+    "/u/test/guidelines",
+    "/u/test/register",
     "/student/login",
     "/admin/login",
 ]
@@ -24,8 +24,9 @@ UNIT_ADMIN = [
     "/admin/queue",
     "/admin/template-version/{template_version_id}",
 ]
-SUPER_ADMIN = ["/admin", "/admin/structure", "/admin/admins", "/admin/ai"]
-SUPER_PASSWORD = "a long chosen passphrase"
+UNIVERSITY_ADMIN = ["/admin", "/admin/structure", "/admin/admins"]
+PLATFORM_ADMIN = ["/admin", "/platform/universities", "/admin/ai"]
+PLATFORM_PASSWORD = "a long chosen passphrase"
 
 
 class PageRenderingTests(AppTestCase):
@@ -49,9 +50,17 @@ class PageRenderingTests(AppTestCase):
         client = self.logged_in_admin()
         self.assertEqual(self.statuses(client, UNIT_ADMIN), dict.fromkeys(UNIT_ADMIN, 200))
 
-    def test_super_admin_pages_render(self):
+    def test_university_admin_pages_render(self):
+        client = self.logged_in_admin("university.admin@example.edu")
+        self.assertEqual(
+            self.statuses(client, UNIVERSITY_ADMIN), dict.fromkeys(UNIVERSITY_ADMIN, 200)
+        )
+
+    def test_platform_admin_pages_render(self):
         with self.Session() as db:
-            create_super_admin(db, "Super", "super@example.edu", SUPER_PASSWORD)
+            create_platform_admin(db, "Platform", "platform@example.edu", PLATFORM_PASSWORD)
         client = self.client()
-        client.post("/admin/login", data={"email": "super@example.edu", "password": SUPER_PASSWORD})
-        self.assertEqual(self.statuses(client, SUPER_ADMIN), dict.fromkeys(SUPER_ADMIN, 200))
+        client.post(
+            "/admin/login", data={"email": "platform@example.edu", "password": PLATFORM_PASSWORD}
+        )
+        self.assertEqual(self.statuses(client, PLATFORM_ADMIN), dict.fromkeys(PLATFORM_ADMIN, 200))

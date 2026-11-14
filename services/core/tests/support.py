@@ -51,10 +51,8 @@ class AppTestCase(unittest.TestCase):
         self.assertEqual(response.headers.get("location"), "/student/dashboard")
         return client
 
-    def logged_in_admin(self) -> TestClient:
+    def logged_in_admin(self, email: str = "unit.admin@example.edu") -> TestClient:
         client = self.client()
-        response = client.post(
-            "/admin/login", data={"email": "unit.admin@example.edu", "password": PASSWORD}
-        )
+        response = client.post("/admin/login", data={"email": email, "password": PASSWORD})
         self.assertEqual(response.headers.get("location"), "/admin")
         return client

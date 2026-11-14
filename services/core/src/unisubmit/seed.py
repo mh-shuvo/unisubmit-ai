@@ -1,5 +1,5 @@
-"""Bootstrap data, created deliberately through the CLI rather than on every
-web startup: `unisubmit seed-demo` and `unisubmit create-super-admin`.
+"""Demo data, created deliberately with `unisubmit seed-demo` rather than on
+every web startup.
 
 The web startup used to call `seed()`, which created `admin@unisubmit.local`
 with the password `Admin@123`, published in the README (DEF-028).
@@ -8,16 +8,16 @@ with the password `Admin@123`, published in the README (DEF-028).
 from sqlalchemy.orm import Session
 
 from .core.config import get_settings
-from .models import AdminUser, AIProfile, Department, Faculty, Program, Teacher, Template
-from .security import hash_password
-
-MIN_ADMIN_PASSWORD = 12
+from .models import AIProfile, Department, Faculty, Program, Teacher, Template, University
 
 
 def seed_demo_data(db: Session) -> None:
-    """Sample academic structure for a demo. Creates no accounts."""
-    if db.query(Faculty).count() == 0:
-        sci = Faculty(name="Faculty of Science", code="SCI")
+    """A demo university with a sample academic structure. Creates no accounts."""
+    if db.query(University).count() == 0:
+        demo = University(name="Demo University", slug="demo", is_active=True)
+        db.add(demo)
+        db.flush()
+        sci = Faculty(name="Faculty of Science", code="SCI", university_id=demo.id)
         db.add(sci)
         db.flush()
         cse = Department(name="Computer Science and Engineering", code="CSE", faculty_id=sci.id)
@@ -35,12 +35,14 @@ def seed_demo_data(db: Session) -> None:
                     name="Dr. Ayesha Rahman",
                     designation="Professor",
                     email="ayesha.rahman@example.edu",
+                    university_id=demo.id,
                     department_id=cse.id,
                 ),
                 Teacher(
                     name="Dr. Mahmud Hasan",
                     designation="Associate Professor",
                     email="mahmud.hasan@example.edu",
+                    university_id=demo.id,
                     department_id=cse.id,
                 ),
             ]
@@ -61,17 +63,3 @@ def seed_demo_data(db: Session) -> None:
             )
         )
     db.commit()
-
-
-def create_super_admin(db: Session, name: str, email: str, password: str) -> AdminUser:
-    email = email.strip().lower()
-    if len(password) < MIN_ADMIN_PASSWORD:
-        raise ValueError(f"The password must be at least {MIN_ADMIN_PASSWORD} characters.")
-    if db.query(AdminUser).filter(AdminUser.email == email).first():
-        raise ValueError(f"An admin with email {email} already exists.")
-    admin = AdminUser(
-        name=name, email=email, password_hash=hash_password(password), role="SUPER_ADMIN"
-    )
-    db.add(admin)
-    db.commit()
-    return admin

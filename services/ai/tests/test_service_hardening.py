@@ -155,6 +155,34 @@ class CollectionNameTests(unittest.TestCase):
             )
         self.assertEqual((response.status_code, retrieve.call_args.args[0]), (200, "tv_7"))
 
+    def test_points_record_the_university(self):
+        """P2.10: every indexed chunk names the university that owns it."""
+        form = dict(
+            department="CSE",
+            program="M.Sc. (CSE)",
+            submission_type="Thesis",
+            template_version="1.0",
+            collection="tv_7",
+            university_id="3",
+        )
+        with (
+            patch.object(service, "extract_pdf_pages", return_value=[{"page": 1, "text": "Rule."}]),
+            patch.object(service, "ensure_collection"),
+            patch.object(service, "embed_texts", return_value=[[0.0] * 4]),
+            patch.object(service, "qdrant_client", MagicMock()) as qdrant,
+        ):
+            run(
+                call(
+                    "POST",
+                    "/rag/index-template",
+                    data=form,
+                    headers=AUTH,
+                    files={"pdf": ("g.pdf", b"%PDF-1.4", "application/pdf")},
+                )
+            )
+        points = qdrant.upsert.call_args.kwargs["points"]
+        self.assertEqual({point.payload["university_id"] for point in points}, {3})
+
     def test_unsafe_collection_name_is_rejected(self):
         response, ensure = self.index(collection="../other")
         self.assertEqual((response.status_code, ensure.called), (422, False))

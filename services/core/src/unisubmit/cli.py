@@ -1,8 +1,9 @@
 """The `unisubmit` command: schema migrations and bootstrap data.
 
-    unisubmit migrate                          # create or upgrade the schema
-    unisubmit seed-demo                        # sample faculty, programs, supervisors
-    unisubmit create-super-admin --email ...   # first Super Admin, password prompted
+    unisubmit migrate                             # create or upgrade the schema
+    unisubmit relocate-files                      # move pre-v10 uploads into per-university folders
+    unisubmit seed-demo                           # demo university, faculty, programs, supervisors
+    unisubmit create-platform-admin --email ...   # first Platform Admin, password prompted
 
 Run `migrate` before starting the web app and the worker; neither creates
 tables (DEF-039, DEF-045).
@@ -13,95 +14,140 @@ import getpass
 import os
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 import unisubmit.models  # noqa: F401  registers every table on Base.metadata
+from unisubmit import storage
 from unisubmit.core.config import get_settings
 from unisubmit.core.db import Base, create_db_engine, make_session_factory
-from unisubmit.seed import create_super_admin, seed_demo_data
+from unisubmit.models import SubmissionVersion, TemplateVersion
+from unisubmit.seed import seed_demo_data
+from unisubmit.tenancy import TenancyError, create_platform_admin
 
 # The revision that describes the schema `create_all` built before migrations.
 BASELINE = "0001"
 
 
-def _constraint_key(constraint: sa.Constraint) -> tuple[str, ...] | None:
-    if isinstance(constraint, sa.PrimaryKeyConstraint):
-        return ("p",)
-    if isinstance(constraint, sa.ForeignKeyConstraint):
-        return ("f", *constraint.column_keys, "->", constraint.referred_table.name)
-    if isinstance(constraint, sa.UniqueConstraint):
-        return ("u", *sorted(column.name for column in constraint.columns))
-    return None
+# Constraints Postgres named itself, and the names the naming convention gives
+# them; reading the schema rather than the models keeps adoption valid for
+# every later revision.
+POSTGRES_NAMES = sa.text(
+    """
+    SELECT c.conrelid::regclass::text, c.conname, c.contype,
+           array_agg(a.attname ORDER BY k.ord), max(c.confrelid::regclass::text)
+    FROM pg_constraint c
+    JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE c.connamespace = current_schema()::regnamespace AND c.contype IN ('p', 'u', 'f')
+    GROUP BY c.conrelid, c.conname, c.contype
+    """
+)
+
+
+def _convention_name(table: str, name: str, kind: str, columns: list[str], ref: str) -> str:
+    joined = "_".join(columns)
+    if kind == "p" and name == f"{table}_pkey":
+        return f"pk_{table}"
+    if kind == "u" and name == f"{table}_{joined}_key":
+        return f"uq_{table}_{joined}"
+    if kind == "f" and name == f"{table}_{joined}_fkey":
+        return f"fk_{table}_{columns[0]}_{ref}"
+    return name  # named explicitly in the models, e.g. uq_program_submission_type
 
 
 def _adopt_constraint_names(connection: sa.Connection) -> None:
-    """Rename constraints Postgres named itself (`teachers_email_key`) to the
-    names the baseline gives them (`uq_teachers_email`), so later migrations
-    can refer to them by name."""
-    inspector = sa.inspect(connection)
+    """Rename `teachers_email_key` and the like to `uq_teachers_email`, the name
+    the baseline revision gives it, so later migrations can refer to it."""
     quote = connection.dialect.identifier_preparer.quote
-    for table in Base.metadata.sorted_tables:
-        existing: dict[tuple[str, ...], str | None] = {
-            ("p",): inspector.get_pk_constraint(table.name)["name"]
-        }
-        for fk in inspector.get_foreign_keys(table.name):
-            existing[("f", *fk["constrained_columns"], "->", fk["referred_table"])] = fk["name"]
-        for unique in inspector.get_unique_constraints(table.name):
-            existing[("u", *sorted(unique["column_names"]))] = unique["name"]
-        for constraint in table.constraints:
-            key = _constraint_key(constraint)
-            old = existing.get(key) if key else None
-            if old and isinstance(constraint.name, str) and old != constraint.name:
-                connection.execute(
-                    sa.text(
-                        f"ALTER TABLE {quote(table.name)} "
-                        f"RENAME CONSTRAINT {quote(old)} TO {quote(constraint.name)}"
-                    )
+    for table, name, kind, columns, ref in connection.execute(POSTGRES_NAMES).all():
+        new = _convention_name(table, name, kind, columns, ref or "")
+        if new != name:
+            connection.execute(
+                sa.text(
+                    f"ALTER TABLE {quote(table)} RENAME CONSTRAINT {quote(name)} TO {quote(new)}"
                 )
+            )
 
 
 def migrate(engine: sa.Engine) -> None:
     """Upgrade to the latest revision.
 
-    A database created by `create_all` before migrations existed is adopted:
-    its constraints are renamed to the baseline's names and it is stamped at
-    the baseline if it then matches the models exactly. Otherwise it is
-    refused, since its differences would make later migrations fail; the
-    renames are rolled back with it.
+    A database created by `create_all` before migrations existed (v9.14 and
+    earlier) is adopted in the same transaction: its constraints get the
+    baseline's names, it is stamped at the baseline and upgraded, and only if
+    it then matches the models exactly is the transaction committed. Otherwise
+    nothing changes and the differences are listed.
     """
     config = Config()
     config.set_main_option("script_location", "unisubmit:migrations")
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         tables = set(sa.inspect(connection).get_table_names())
-        if tables and "alembic_version" not in tables:
+        adopting = bool(tables) and "alembic_version" not in tables
+        if adopting:
             _adopt_constraint_names(connection)
+            command.stamp(config, BASELINE)
+        command.upgrade(config, "head")
+        if adopting:
             differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
             if differences:
                 listed = "\n".join(f"  {difference}" for difference in differences)
                 raise SystemExit(
-                    "This database was created without migrations and differs from the "
-                    f"baseline schema, so it cannot be adopted:\n{listed}"
+                    "This database was created without migrations and does not match the "
+                    f"models after upgrading, so it was left unchanged:\n{listed}"
                 )
-            command.stamp(config, BASELINE)
-            print(f"Adopted the existing schema at revision {BASELINE}.")
-        command.upgrade(config, "head")
+            print(f"Adopted the existing schema at revision {BASELINE} and upgraded it.")
     print("The database schema is up to date.")
+
+
+def relocate_files(db: Session) -> tuple[int, int]:
+    """Move files stored under absolute pre-v10 paths into `<root>/<university>/<kind>/`
+    and store relative paths (P2.9, DEF-042). Returns (moved, missing); safe to rerun."""
+    moved = missing = 0
+    rows: list[tuple[object, str, int, storage.Kind]] = []
+    for guideline in db.scalars(select(TemplateVersion)):
+        program = guideline.template.program
+        unit = program.department.faculty if program.department else program.institute
+        rows += [
+            (guideline, "pdf_path", unit.university_id, "guidelines"),
+            (guideline, "additional_rules_pdf_path", unit.university_id, "guidelines"),
+        ]
+    for upload in db.scalars(select(SubmissionVersion)):
+        rows += [
+            (upload, "pdf_path", upload.submission.university_id, "submissions"),
+            (upload, "report_path", upload.submission.university_id, "reports"),
+        ]
+    for row, column, university_id, kind in rows:
+        stored = getattr(row, column)
+        if not stored or not Path(stored).is_absolute():
+            continue
+        new = storage.relocate(stored, university_id, kind)
+        if new is None:
+            missing += 1
+        else:
+            setattr(row, column, new)
+            moved += 1
+    db.commit()
+    return moved, missing
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="unisubmit", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate", help="create or upgrade the database schema")
-    commands.add_parser("seed-demo", help="create the sample faculty, programs and supervisors")
-    admin = commands.add_parser("create-super-admin", help="create a Super Admin account")
+    commands.add_parser("relocate-files", help="move pre-v10 files into per-university folders")
+    commands.add_parser("seed-demo", help="create a demo university with sample data")
+    admin = commands.add_parser("create-platform-admin", help="create a Platform Admin account")
     admin.add_argument("--email", required=True)
-    admin.add_argument("--name", default="System Super Admin")
+    admin.add_argument("--name", default="Platform Admin")
     args = parser.parse_args(argv)
 
     engine = create_db_engine(str(get_settings().database_url))
@@ -110,6 +156,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             migrate(engine)
             return 0
         with make_session_factory(engine)() as db:
+            if args.command == "relocate-files":
+                moved, missing = relocate_files(db)
+                print(f"Relocated {moved} files; {missing} referenced files were not found.")
+                return 0
             if args.command == "seed-demo":
                 seed_demo_data(db)
                 print("Demo academic data is in place.")
@@ -123,11 +173,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("The passwords do not match.", file=sys.stderr)
                 return 1
             try:
-                create_super_admin(db, args.name, args.email, password)
-            except ValueError as exc:
+                create_platform_admin(db, args.name, args.email, password)
+            except TenancyError as exc:
                 print(exc, file=sys.stderr)
                 return 1
-            print(f"Super Admin {args.email.strip().lower()} created.")
+            print(f"Platform Admin {args.email.strip().lower()} created.")
             return 0
     finally:
         engine.dispose()

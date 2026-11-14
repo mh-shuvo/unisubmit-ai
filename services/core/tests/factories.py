@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import fitz
 
 from unisubmit.models import (
+    AdminRole,
     AdminUser,
     AIJob,
     AIProfile,
@@ -19,6 +20,7 @@ from unisubmit.models import (
     Teacher,
     Template,
     TemplateVersion,
+    University,
 )
 from unisubmit.security import hash_password
 
@@ -33,9 +35,26 @@ def pdf_bytes(text: str = "Chapter 1 Introduction") -> bytes:
     return data
 
 
-def build_world(db, tmp: Path) -> SimpleNamespace:
-    """One department with a program, a supervisor, an indexed guideline and a student."""
-    faculty = Faculty(name="Faculty of Science", code="SCI")
+def stored_pdf(tmp: Path, university_id: int, kind: str, name: str, text: str) -> str:
+    """Write a PDF under the storage root `tmp` and return its stored, relative path."""
+    path = tmp / str(university_id) / kind / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(pdf_bytes(text))
+    return path.relative_to(tmp).as_posix()
+
+
+def build_world(db, tmp: Path, slug: str = "test") -> SimpleNamespace:
+    """One university with a department, program, supervisor, indexed guideline,
+    student, unit admin and University Admin. `tmp` is the storage root.
+
+    A second world needs another `slug`; its emails then end in
+    `@{slug}.example.edu`, because login emails are unique installation-wide.
+    """
+    domain = "example.edu" if slug == "test" else f"{slug}.example.edu"
+    university = University(name=f"{slug.title()} University", slug=slug, is_active=True)
+    db.add(university)
+    db.flush()
+    faculty = Faculty(name="Faculty of Science", code="SCI", university_id=university.id)
     db.add(faculty)
     db.flush()
     department = Department(name="Computer Science", code="CSE", faculty_id=faculty.id)
@@ -45,7 +64,8 @@ def build_world(db, tmp: Path) -> SimpleNamespace:
     teacher = Teacher(
         name="Dr Supervisor",
         designation="Professor",
-        email="supervisor@example.edu",
+        email=f"supervisor@{domain}",
+        university_id=university.id,
         department_id=department.id,
     )
     db.add_all([program, teacher])
@@ -53,12 +73,10 @@ def build_world(db, tmp: Path) -> SimpleNamespace:
     template = Template(submission_type="Thesis", title="M.Sc. Thesis", program_id=program.id)
     db.add(template)
     db.flush()
-    guideline = tmp / "guideline.pdf"
-    guideline.write_bytes(pdf_bytes("Thesis guideline"))
     template_version = TemplateVersion(
         template_id=template.id,
         version="1.0",
-        pdf_path=str(guideline),
+        pdf_path=stored_pdf(tmp, university.id, "guidelines", "guideline.pdf", "Thesis guideline"),
         status="Active",
         rag_status="Indexed",
         rag_collection="tv_legacy_name",
@@ -74,20 +92,30 @@ def build_world(db, tmp: Path) -> SimpleNamespace:
     student = StudentUser(
         name="Test Student",
         student_id="S-001",
-        email="student@example.edu",
+        email=f"student@{domain}",
         password_hash=hash_password(PASSWORD),
+        university_id=university.id,
         department_id=department.id,
     )
     admin = AdminUser(
         name="Unit Admin",
-        email="unit.admin@example.edu",
+        email=f"unit.admin@{domain}",
         password_hash=hash_password(PASSWORD),
-        role="UNIT_ADMIN",
+        role=AdminRole.UNIT_ADMIN,
+        university_id=university.id,
         department_id=department.id,
     )
-    db.add_all([template_version, profile, student, admin])
+    university_admin = AdminUser(
+        name="University Admin",
+        email=f"university.admin@{domain}",
+        password_hash=hash_password(PASSWORD),
+        role=AdminRole.UNIVERSITY_ADMIN,
+        university_id=university.id,
+    )
+    db.add_all([template_version, profile, student, admin, university_admin])
     db.flush()
     submission = Submission(
+        university_id=university.id,
         student_user_id=student.id,
         title="A Study of Formatting Compliance",
         program_id=program.id,
@@ -99,7 +127,13 @@ def build_world(db, tmp: Path) -> SimpleNamespace:
     db.add(submission)
     db.commit()
     return SimpleNamespace(
+        domain=domain,
+        slug=slug,
+        university_id=university.id,
+        faculty_id=faculty.id,
+        department_id=department.id,
         program_id=program.id,
+        teacher_id=teacher.id,
         template_version_id=template_version.id,
         profile_id=profile.id,
         student_id=student.id,
@@ -111,12 +145,17 @@ def build_world(db, tmp: Path) -> SimpleNamespace:
 def add_version(db, submission_id: int, tmp: Path, job_status: str, **job_fields) -> int:
     """Add a submission version with its queue job; returns the job id."""
     number = db.query(SubmissionVersion).filter_by(submission_id=submission_id).count() + 1
-    path = tmp / f"submission_{submission_id}_v{number}.pdf"
-    path.write_bytes(pdf_bytes(f"Version {number}"))
+    university_id = db.get(Submission, submission_id).university_id
     version = SubmissionVersion(
         submission_id=submission_id,
         version_no=number,
-        pdf_path=str(path),
+        pdf_path=stored_pdf(
+            tmp,
+            university_id,
+            "submissions",
+            f"submission_{submission_id}_v{number}.pdf",
+            f"Version {number}",
+        ),
         status=job_status,
     )
     db.add(version)
