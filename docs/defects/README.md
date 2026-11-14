@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-56 entries: 48 defects and 8 limitations. 12 open, 44 closed.
+56 entries: 48 defects and 8 limitations. 11 open, 45 closed.
 
 ---
 
@@ -26,7 +26,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [LIM-003](LIM-003.md) | One Ollama instance is a shared serial resource with no admission control | limitation | `resource-contention` | major | Any throughput claim; running `test_job.py` beside the live worker | 2026-10-27 |
 | [LIM-005](LIM-005.md) | Reproduction artefacts the defect documents cite no longer exist | limitation | `observability-gap` | blocking | Replaying any quantitative claim in the episode documents | 2026-11-02 |
 | [DEF-021](DEF-021.md) | An unavailable repair service is reported as invalid model output | defect | `observability-gap` | major | Nothing; misdirects diagnosis of a model-service outage | 2026-11-02 |
-| [LIM-006](LIM-006.md) | The test suite runs only when invoked by hand | limitation | `observability-gap` | minor | Nothing; weakens the standing regression guarantee | 2026-11-02 |
 | [DEF-037](DEF-037.md) | Submitting the new-submission form twice creates two submissions and two jobs | defect | `job-coordination` | major | Nothing; wastes a model run per double-click | 2026-11-14 |
 | [DEF-038](DEF-038.md) | Guideline parsing and indexing run inside the admin's HTTP request for up to 25 minutes | defect | `timeout-misalignment` | major | Any deployment behind a proxy with a shorter timeout | 2026-11-14 |
 | [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | minor | Nothing; matters after a database leak | 2026-11-14 |
@@ -89,12 +88,13 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-046](DEF-046.md) | The upload lock is released before the new version's job exists, so two quick uploads can still both be queued | defect | `job-coordination` | Timing/Serialisation | v10.0, `39ebc9b` | `test_concurrent_uploads_never_share_a_version_number` |
 | [DEF-047](DEF-047.md) | Every HTML page fails with 500 after the Starlette 1.x upgrade, and no test rendered a page | defect | `dependency-api-drift` | Interface | v10.0, `64556cd` (introduced and fixed before merge) | `PageRenderingTests` |
 | [DEF-048](DEF-048.md) | In the uv-built images, every console script points at an interpreter that does not exist | defect | `runtime-environment` | Build/Package | v10.0, `e884275` (introduced and fixed before merge) | none |
+| [LIM-006](LIM-006.md) | The test suite runs only when invoked by hand | limitation | `observability-gap` | n/a | v10.0, `4bb65a6` | `.github/workflows/ci.yml` |
 
 `DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are
 not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
 `CHANGELOG_v9_13.md`; `DEF-024` to `DEF-036`, `DEF-045` and `LIM-008` (Phase 0 of the
 restructuring plan, branch `phase-0-demo-critical-fixes`) in
-`CHANGELOG_v9_14.md`; `DEF-039` and `DEF-046` to `DEF-048` (Phase 1, branch
+`CHANGELOG_v9_14.md`; `DEF-039`, `DEF-046` to `DEF-048` and `LIM-006` (Phase 1, branch
 `phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 

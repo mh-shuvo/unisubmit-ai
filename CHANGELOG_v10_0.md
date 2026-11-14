@@ -52,7 +52,8 @@ same steps in order.
 - import-linter: the two services never import each other, and in the core
   `core/` imports nothing above it.
 - CI (`.github/workflows/ci.yml`) runs all of the above, the migrations
-  check and every test suite on PostgreSQL 16.
+  check and every test suite on PostgreSQL 16 (closes `LIM-006`: green on
+  pull request #3).
 - pre-commit hooks run the same locked tools.
 
 ## Settings, database and app factory (P1.5, P1.6, P1.7)
