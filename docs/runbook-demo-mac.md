@@ -25,9 +25,9 @@ reachable from this Mac ([DEF-030](defects/DEF-030.md)).
 
 ## One-time setup
 
-1. Secrets. In `.env` set `APP_SECRET`, `AI_SERVICE_TOKEN`, `QDRANT_API_KEY`
-   and `POSTGRES_PASSWORD`; in `ai_service/.env` set the same
-   `AI_SERVICE_TOKEN` and `QDRANT_API_KEY`. Generate each value with
+1. Secrets. In `.env` set `APP_SECRET`, `AI_SERVICE_TOKEN` and
+   `POSTGRES_PASSWORD`; in `ai_service/.env` set the same `AI_SERVICE_TOKEN`.
+   Qdrant needs no key. Generate each value with
    `openssl rand -hex 32`. Nothing starts until they are set.
    For an existing `pgdata` volume, `POSTGRES_PASSWORD` must be the password the
    volume was created with (`unisubmit` for installations from before v9.14).
@@ -110,8 +110,7 @@ DATABASE_URL=postgresql://unisubmit:<password>@127.0.0.1:5433/unisubmit \
 | `docker compose` refuses to start: "Set … in .env" | A secret is missing; see one-time setup |
 | AI status page: offline, but `/health` works in a browser | `AI_SERVICE_TOKEN` differs between `.env` and `ai_service/.env` (calls get 401) |
 | AI service exits at startup: "Service token" failed | `AI_SERVICE_TOKEN` missing or shorter than 32 characters in `ai_service/.env` |
-| AI service exits at startup: Qdrant failed | Docker is not running, or `QDRANT_API_KEY` differs from `.env` |
-| `ai-service` container exits: "QDRANT_API_KEY is not set" | The container predates v9.14 and was never recreated. `docker compose rm -sf ai-service` and run the AI service natively, or recreate it with `--profile ai` |
+| AI service exits at startup: Qdrant failed | Docker is not running, or `QDRANT_URL` in `ai_service/.env` is not `http://127.0.0.1:6333` |
 | A job stays "AI validation in progress" | The worker stopped mid-job; it is requeued when the worker restarts after `RAG_VALIDATE_TIMEOUT` + 5 minutes. `docker compose logs worker` says why it stopped |
 | Uploading a revised version says the submission is still being validated | Expected while its job is queued or running ([DEF-026](defects/DEF-026.md)) |
 

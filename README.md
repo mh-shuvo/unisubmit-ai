@@ -54,11 +54,11 @@ generated with `openssl rand -hex 32`:
 |---|---|
 | `APP_SECRET` | web app and worker: signs session cookies |
 | `AI_SERVICE_TOKEN` | web app, worker and AI service: every AI call needs it |
-| `QDRANT_API_KEY` | Qdrant and the AI service |
 | `POSTGRES_PASSWORD` | PostgreSQL in Docker (an existing volume keeps the password it was created with) |
 
 The AI service reads `ai_service/.env` when run natively, so `AI_SERVICE_TOKEN`
-and `QDRANT_API_KEY` go there as well.
+goes there as well. Qdrant needs no key: the AI service connects to it by URL
+(`QDRANT_URL`), and its port is bound to `127.0.0.1`.
 
 ## Run with Docker
 
@@ -76,7 +76,7 @@ DOCKER_AI_SERVICE_URL=http://ai-service:8001 docker compose --profile ai up -d -
 ```
 
 - App: http://127.0.0.1:8000 (admin: http://127.0.0.1:8000/admin/login)
-- Qdrant: http://127.0.0.1:6333/dashboard (needs `QDRANT_API_KEY`)
+- Qdrant: http://127.0.0.1:6333/dashboard
 - PostgreSQL: host port 5433, user `unisubmit`, password from `POSTGRES_PASSWORD`
 
 Every port is bound to `127.0.0.1`, so nothing is reachable from another

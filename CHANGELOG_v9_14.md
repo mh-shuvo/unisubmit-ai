@@ -6,9 +6,9 @@ hit, made without schema changes, because the project has no migrations yet
 
 ## Upgrade steps
 
-- Set `APP_SECRET`, `AI_SERVICE_TOKEN`, `QDRANT_API_KEY` and
-  `POSTGRES_PASSWORD` in `.env`, and the same `AI_SERVICE_TOKEN` and
-  `QDRANT_API_KEY` in `ai_service/.env` (`openssl rand -hex 32` for each).
+- Set `APP_SECRET`, `AI_SERVICE_TOKEN` and `POSTGRES_PASSWORD` in `.env`,
+  and the same `AI_SERVICE_TOKEN` in `ai_service/.env`
+  (`openssl rand -hex 32` for each).
   Nothing starts without them. An existing `pgdata` volume keeps its
   original password, `unisubmit`.
 - Run the queue worker: `python -m app.worker` natively, or the new `worker`
@@ -59,8 +59,9 @@ hit, made without schema changes, because the project has no migrations yet
 - The AI service requires `Authorization: Bearer <AI_SERVICE_TOKEN>` on every
   route except `/` and `/health`, refuses to start without a token, and the
   web app sends it on every call.
-- Every published port is bound to `127.0.0.1`; PostgreSQL and Qdrant
-  credentials come from `.env`, and Qdrant runs with an API key.
+- Every published port is bound to `127.0.0.1`, and the PostgreSQL password
+  comes from `.env`. Qdrant runs without an API key: the AI service connects
+  to it by URL, and only this machine can reach it.
 
 ## AI service (`DEF-031`, `DEF-032`, `DEF-033`, `DEF-035`, `LIM-008`)
 

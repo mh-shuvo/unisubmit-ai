@@ -62,7 +62,6 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
       EMBEDDING_DEVICE: cpu
       QDRANT_URL: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env (openssl rand -hex 32)}
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-16384}
       OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-4096}
       OLLAMA_JSON_THINK: ${OLLAMA_JSON_THINK:-false}
@@ -75,8 +74,8 @@ services:
   qdrant:
     # Pinned to the version that wrote the existing qdrant_storage volume (DEF-031).
     image: qdrant/qdrant:v1.19.2
-    environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env (openssl rand -hex 32)}
+    # No API key: consumers connect by URL. The port stays on 127.0.0.1, so
+    # only this machine and the containers can reach it.
     ports:
       - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
       - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"

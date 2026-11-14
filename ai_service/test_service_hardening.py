@@ -200,31 +200,5 @@ class EmbeddingDeviceTests(unittest.TestCase):
         self.assertEqual((ok, created.get("devices"), reported), (True, None, "mps:0"))
 
 
-class QdrantKeyPreflightTests(unittest.TestCase):
-    """A 401 from Qdrant at startup names the setting to fix, not just the status."""
-
-    def check(self, env):
-        class RejectingClient:
-            def __init__(self, **kwargs):
-                pass
-
-            def info(self):
-                raise Exception("Unexpected Response: 401 (Unauthorized)")
-
-        with patch.object(service, "QdrantClient", RejectingClient), \
-                patch.dict("os.environ", env, clear=False):
-            if "QDRANT_API_KEY" not in env:
-                service.os.environ.pop("QDRANT_API_KEY", None)
-            return service._check_qdrant_sync()
-
-    def test_missing_key_is_named(self):
-        ok, detail = self.check({})
-        self.assertEqual((ok, "QDRANT_API_KEY is not set" in detail), (False, True))
-
-    def test_wrong_key_is_named(self):
-        ok, detail = self.check({"QDRANT_API_KEY": "not-the-key"})
-        self.assertEqual((ok, "rejected QDRANT_API_KEY" in detail), (False, True))
-
-
 if __name__ == "__main__":
     unittest.main()

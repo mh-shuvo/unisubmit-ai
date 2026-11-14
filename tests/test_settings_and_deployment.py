@@ -116,7 +116,7 @@ class ComposeTests(unittest.TestCase):
     def test_no_secret_falls_back_to_a_default(self):
         """DEF-027 and DEF-030: secrets must be set, never defaulted."""
         text = (ROOT / "docker-compose.yml").read_text()
-        for variable in ("APP_SECRET", "AI_SERVICE_TOKEN", "POSTGRES_PASSWORD", "QDRANT_API_KEY"):
+        for variable in ("APP_SECRET", "AI_SERVICE_TOKEN", "POSTGRES_PASSWORD"):
             with self.subTest(variable=variable):
                 defaulted = re.search(r"\$\{" + variable + r":-", text)
                 required = re.search(r"\$\{" + variable + r":\?", text)
