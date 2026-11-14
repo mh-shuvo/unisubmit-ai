@@ -1,26 +1,23 @@
-import os
-import sys
+import asyncio
 import hmac
 import json
-import asyncio
 import logging
-import threading
-from functools import wraps
-from importlib.metadata import version as package_version
+import os
 import re
-import uuid
+import sys
 import tempfile
-from dotenv import load_dotenv
-from typing import Optional
+import threading
+import uuid
+from functools import wraps
 from urllib.parse import quote
 
-import httpx
 import fitz  # PyMuPDF
-
-from fastapi import Depends, FastAPI, UploadFile, File, Form, HTTPException, Request
+import httpx
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, ScoredPoint
+from qdrant_client.models import Distance, PointStruct, ScoredPoint, VectorParams
 
 load_dotenv()
 
@@ -141,7 +138,7 @@ def _check_qdrant_sync() -> tuple[bool, str]:
         return False, str(exc)
 
 
-def embedding_device() -> Optional[str]:
+def embedding_device() -> str | None:
     """The device the embedding model actually runs on, as FlagEmbedding resolved it."""
     if embedding_model is None:
         return EMBEDDING_DEVICE
@@ -241,7 +238,7 @@ COLLECTION_PATTERN = r"^[A-Za-z0-9_]{1,128}$"
 
 
 class SearchRequest(BaseModel):
-    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
+    collection: str | None = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -251,7 +248,7 @@ class SearchRequest(BaseModel):
 
 
 class ValidateRAGRequest(BaseModel):
-    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
+    collection: str | None = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -297,7 +294,7 @@ def make_collection_name(
 
 
 def resolve_collection(
-    collection: Optional[str],
+    collection: str | None,
     department: str,
     program: str,
     submission_type: str,
@@ -638,7 +635,7 @@ async def index_template(
     submission_type: str = Form(...),
     template_version: str = Form(...),
     recreate: bool = Form(True),
-    collection: Optional[str] = Form(None),
+    collection: str | None = Form(None),
     pdf: UploadFile = File(...),
 ):
     if not pdf.filename.lower().endswith(".pdf"):
@@ -1055,7 +1052,7 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
             try:
                 repaired = await call_ollama(request.base_model, repair, json_mode=True)
                 payload = _validation_payload(repaired)
-            except Exception as exc:
+            except Exception:
                 # One unusable batch must not discard the batches that succeeded;
                 # its rules stay NOT VERIFIED and the gap is reported.
                 logger.exception(
@@ -1185,7 +1182,7 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
 # Explicit formatting profile extraction
 # -----------------------------
 class FormatProfileRequest(BaseModel):
-    collection: Optional[str] = Field(default=None, pattern=COLLECTION_PATTERN)
+    collection: str | None = Field(default=None, pattern=COLLECTION_PATTERN)
     department: str
     program: str
     submission_type: str
@@ -1346,7 +1343,8 @@ def _extract_cover_candidate(doc: fitz.Document) -> dict:
 
 
 def _parse_json_object(text: str):
-    import json, ast
+    import ast
+    import json
 
     raw = (text or "").strip()
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.I | re.S).strip()
@@ -2054,7 +2052,7 @@ APPROVED GUIDELINE TEXT:
                 _parse_guideline_chunks(page_items, base_model, prompt_template),
                 timeout=1500,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raw = {}
             chunk_diagnostics = {
                 "total": 0,

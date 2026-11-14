@@ -1,7 +1,5 @@
 import json
 import re
-from collections import Counter
-
 
 _OPERATOR_PREFIX_RE = re.compile(r"^\s*(>=|<=|=>|=<|≥|≤|>|<|~|=)\s*")
 _OPERATOR_WORDS_RE = re.compile(

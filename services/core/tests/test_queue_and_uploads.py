@@ -25,7 +25,6 @@ from fastapi.routing import APIRoute
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import UploadFile
-
 from support import (
     TEST_AI_TOKEN,
     AppTestCase,
@@ -36,7 +35,7 @@ from support import (
 )
 from unisubmit.config import settings
 from unisubmit.db import Base, get_db
-from unisubmit.models import AIJob, AdminUser, Submission, SubmissionVersion, TemplateVersion
+from unisubmit.models import AdminUser, AIJob, Submission, SubmissionVersion
 
 
 class WebProcessTests(AppTestCase):
@@ -330,7 +329,6 @@ class AIClientAuthTests(unittest.TestCase):
         import tempfile
 
         import httpx
-
         from unisubmit import ai_service_client as client
 
         seen = []

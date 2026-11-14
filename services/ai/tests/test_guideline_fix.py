@@ -1,7 +1,7 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from unisubmit_ai import main as service
@@ -111,13 +111,15 @@ class GuidelineFixTests(unittest.TestCase):
             )
 
         original = httpx.AsyncClient
-        with patch.object(
-            service.httpx,
-            "AsyncClient",
-            side_effect=lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+        with (
+            patch.object(
+                service.httpx,
+                "AsyncClient",
+                side_effect=lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+            ),
+            self.assertRaises(service.IncompleteOllamaResponse),
         ):
-            with self.assertRaises(service.IncompleteOllamaResponse):
-                asyncio.run(service.call_ollama("qwen", "prompt", json_mode=True))
+            asyncio.run(service.call_ollama("qwen", "prompt", json_mode=True))
         self.assertFalse(captured[0]["think"])
         self.assertGreaterEqual(captured[0]["options"]["num_ctx"], 8192)
         self.assertGreaterEqual(captured[0]["options"]["num_predict"], 4096)

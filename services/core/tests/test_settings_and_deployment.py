@@ -20,7 +20,6 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
 from support import ROOT
 from unisubmit.config import Settings
 from unisubmit.db import Base

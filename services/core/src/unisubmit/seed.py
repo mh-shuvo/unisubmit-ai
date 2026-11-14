@@ -13,7 +13,7 @@ import os
 import sys
 
 from .config import settings
-from .models import Faculty, Department, Program, Teacher, Template, AIProfile, AdminUser
+from .models import AdminUser, AIProfile, Department, Faculty, Program, Teacher, Template
 from .security import hash_password
 
 MIN_ADMIN_PASSWORD = 12

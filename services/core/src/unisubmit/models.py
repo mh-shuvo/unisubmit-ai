@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Text, UniqueConstraint
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from .config import settings
 from .db import Base
 
@@ -43,10 +44,8 @@ class Program(Base):
     name: Mapped[str] = mapped_column(String(220))
     code: Mapped[str] = mapped_column(String(80))
     level: Mapped[str] = mapped_column(String(80), default="Undergraduate")
-    department_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("departments.id"), nullable=True
-    )
-    institute_id: Mapped[Optional[int]] = mapped_column(ForeignKey("institutes.id"), nullable=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     department = relationship("Department", back_populates="programs")
     institute = relationship("Institute", back_populates="programs")
@@ -77,10 +76,8 @@ class AdminUser(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True)
     password_hash: Mapped[str] = mapped_column(String(300))
     role: Mapped[str] = mapped_column(String(40), default="UNIT_ADMIN")
-    department_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("departments.id"), nullable=True
-    )
-    institute_id: Mapped[Optional[int]] = mapped_column(ForeignKey("institutes.id"), nullable=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     department = relationship("Department")
@@ -102,10 +99,8 @@ class StudentUser(Base):
     student_id: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(200), unique=True)
     password_hash: Mapped[str] = mapped_column(String(300))
-    department_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("departments.id"), nullable=True
-    )
-    institute_id: Mapped[Optional[int]] = mapped_column(ForeignKey("institutes.id"), nullable=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -136,10 +131,8 @@ class Teacher(Base):
     designation: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(200), unique=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    department_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("departments.id"), nullable=True
-    )
-    institute_id: Mapped[Optional[int]] = mapped_column(ForeignKey("institutes.id"), nullable=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     department = relationship("Department", back_populates="teachers")
     institute = relationship("Institute", back_populates="teachers")
 
@@ -232,9 +225,7 @@ class Submission(Base):
     program_id: Mapped[int] = mapped_column(ForeignKey("programs.id"))
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"))
     template_version_id: Mapped[int] = mapped_column(ForeignKey("template_versions.id"))
-    ai_profile_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("ai_profiles.id"), nullable=True
-    )
+    ai_profile_id: Mapped[int | None] = mapped_column(ForeignKey("ai_profiles.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="QUEUED")
     email_status: Mapped[str] = mapped_column(String(50), default="Not Sent")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -260,7 +251,7 @@ class SubmissionVersion(Base):
     ai_suggestions: Mapped[str] = mapped_column(Text, default="")
     report_path: Mapped[str] = mapped_column(String(500), default="")
     ai_run_reference: Mapped[str] = mapped_column(String(120), default="")
-    emailed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    emailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     submission = relationship("Submission", back_populates="versions")
     job = relationship(
@@ -279,6 +270,6 @@ class AIJob(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     submission_version = relationship("SubmissionVersion", back_populates="job")

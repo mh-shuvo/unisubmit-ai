@@ -4,7 +4,7 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from unisubmit_ai import main as service

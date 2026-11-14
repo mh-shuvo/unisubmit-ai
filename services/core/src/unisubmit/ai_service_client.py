@@ -1,5 +1,6 @@
 import logging
 import os
+
 import httpx
 
 from .config import settings

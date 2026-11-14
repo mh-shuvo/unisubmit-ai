@@ -20,14 +20,14 @@ import sys
 import time
 from pathlib import Path
 
-from unisubmit.ai_service_client import health, rag_validate  # noqa: E402
-from unisubmit.config import settings  # noqa: E402
-from unisubmit.db import SessionLocal  # noqa: E402
-from unisubmit.format_validation import validate_all_profile_rules  # noqa: E402
-from unisubmit.main import _normalize_profile_severities, semantic_validation_payload  # noqa: E402
-from unisubmit.models import TemplateVersion  # noqa: E402
-from unisubmit.pdf_utils import inspect_pdf  # noqa: E402
-from unisubmit.validators import run_rules  # noqa: E402
+from unisubmit.ai_service_client import health, rag_validate
+from unisubmit.config import settings
+from unisubmit.db import SessionLocal
+from unisubmit.format_validation import validate_all_profile_rules
+from unisubmit.main import _normalize_profile_severities, semantic_validation_payload
+from unisubmit.models import TemplateVersion
+from unisubmit.pdf_utils import inspect_pdf
+from unisubmit.validators import run_rules
 
 
 def timed(fn, *args):

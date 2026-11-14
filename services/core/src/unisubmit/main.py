@@ -1,47 +1,51 @@
-import json, shutil, uuid
+import json
+import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, Request, Depends, Form, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
 
+from .ai_service_client import (
+    health as ai_health,
+)
+from .ai_service_client import (
+    index_template,
+    parse_guideline_profile,
+    rag_validate,
+)
+from .config import settings
 from .db import Base, engine, get_db
+from .emailer import send_submission_email
+from .format_validation import validate_all_profile_rules
 from .models import (
+    AdminUser,
+    AIJob,
+    AIProfile,
+    Department,
     Faculty,
     Institute,
-    Department,
     Program,
+    StudentUser,
+    Submission,
+    SubmissionVersion,
     Teacher,
     Template,
     TemplateVersion,
     ValidationRule,
-    AIProfile,
-    Submission,
-    SubmissionVersion,
-    AdminUser,
-    StudentUser,
-    AIJob,
 )
-from .security import hash_password, verify_password
-from .pdf_utils import inspect_pdf, PDFError
-from .validators import run_rules
-from .format_validation import validate_format_profile, validate_all_profile_rules
-from .ai_service_client import (
-    health as ai_health,
-    rag_validate,
-    index_template,
-    extract_format_profile,
-    parse_guideline_profile,
-)
+from .pdf_utils import PDFError, inspect_pdf
+from .report_parser import inline_markdown_html, parse_ai_report
 from .reporting import build_validation_report
-from .report_parser import parse_ai_report, inline_markdown_html
-from .emailer import send_submission_email
-from .config import settings
+from .security import hash_password, verify_password
+from .validators import run_rules
 
 PACKAGE = Path(__file__).resolve().parent
 STORAGE = settings.storage_dir.resolve()
@@ -1803,8 +1807,8 @@ async def process_job(db, job):
 
 
 # Browser-friendly auth redirects
-from fastapi.responses import RedirectResponse as _Redirect
 from fastapi.exceptions import HTTPException as _HTTPException
+from fastapi.responses import RedirectResponse as _Redirect
 
 
 @app.exception_handler(_HTTPException)

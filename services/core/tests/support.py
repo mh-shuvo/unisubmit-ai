@@ -6,7 +6,6 @@ never read secrets or a database URL from the developer's `.env`.
 
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -27,13 +26,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
-
 from unisubmit import main as web  # noqa: E402
 from unisubmit.db import Base, get_db  # noqa: E402
 from unisubmit.models import (  # noqa: E402
+    AdminUser,
     AIJob,
     AIProfile,
-    AdminUser,
     Department,
     Faculty,
     Program,

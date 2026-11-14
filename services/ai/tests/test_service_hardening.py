@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import unittest
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx

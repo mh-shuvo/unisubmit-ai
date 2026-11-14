@@ -29,5 +29,24 @@ target-version = "py313"
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "S", "ASYNC", "DTZ", "PTH", "RUF", "PL"]
 ignore = ["PLR0913"]  # FastAPI endpoints legitimately take many parameters
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares parameters through these calls in default arguments.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S101", "PLR2004"]
+"**/tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "RUF059", "DTZ003", "SIM117", "ASYNC110"]
+# Legacy baseline (P1.3): the rules each module broke when Ruff was introduced.
+# Entries shrink as modules are split (Phases 5 and 6); new modules get none.
+"services/ai/src/unisubmit_ai/main.py" = ["ASYNC240", "B904", "B905", "E501", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW0603", "PLW2901", "PTH107", "PTH108", "PTH110", "RUF001", "S110", "SIM105"]
+"services/core/src/unisubmit/ai.py" = ["E501"]
+"services/core/src/unisubmit/ai_service_client.py" = ["ASYNC230", "PTH123"]
+"services/core/src/unisubmit/config.py" = ["PLR2004"]
+"services/core/src/unisubmit/format_validation.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR0917", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
+"services/core/src/unisubmit/main.py" = ["B904", "DTZ003", "E402", "E501", "E712", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW2901", "RUF059", "S110", "SIM105"]
+"services/core/src/unisubmit/pdf_utils.py" = ["B904", "B905", "PLR0912", "PLR0915", "PLR2004", "RUF007"]
+"services/core/src/unisubmit/report_parser.py" = ["E501", "PLW2901"]
+"services/core/src/unisubmit/reporting.py" = ["E501", "PLR0912", "PLR0915"]
+"services/core/src/unisubmit/seed.py" = ["PLC0415"]
+"services/core/src/unisubmit/validators.py" = ["E501", "PLR0911", "PLR0912", "PLR2004", "RUF001"]
+"services/core/src/unisubmit/worker.py" = ["DTZ003", "SIM105"]
+"tools/model_verification/verify_model_integrity.py" = ["B007", "E501", "PTH123", "RUF002", "S105", "S603", "S607"]

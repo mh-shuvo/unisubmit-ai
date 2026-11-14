@@ -1,6 +1,7 @@
 import smtplib
 from email.message import EmailMessage
 from pathlib import Path
+
 from .config import settings
 
 

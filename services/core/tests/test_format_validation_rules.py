@@ -19,15 +19,13 @@ And the three defects that made correctly formatted theses fail:
 - font-name normalisation erased the weight before the bold check read it
 """
 
-import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 import fitz
-
-from unisubmit.format_validation import (  # noqa: E402
+from unisubmit.format_validation import (
     _find_section,
     _heading_candidates,
     _is_body_text_line,
@@ -37,10 +35,10 @@ from unisubmit.format_validation import (  # noqa: E402
     _parse_num_op,
     _span_is_bold,
     _strip_qualifier,
-    validate_all_profile_rules,
     _to_title_case,
+    validate_all_profile_rules,
 )
-from unisubmit.pdf_utils import inspect_pdf  # noqa: E402
+from unisubmit.pdf_utils import inspect_pdf
 
 
 def _page(page, **kw):
