@@ -10,48 +10,26 @@ This service is intentionally separate from the UniSubmit Core application.
 - PDF parsing/layout: PyMuPDF
 - API: FastAPI
 
-## Windows setup
+## Setup
 
-Use Python 3.13 for the AI environment.
+The service is a member of the repository's uv workspace (Python 3.13). From
+the repository root:
 
-```powershell
-cd ai_service
-py -3.13 -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-copy .env.example .env
+```bash
+uv sync --all-packages
+ollama pull qwen3:14b
+docker compose up -d qdrant
+uv run uvicorn unisubmit_ai.main:app --host 127.0.0.1 --port 8001
 ```
 
-Install the model once:
+It reads its settings (`AI_SERVICE_TOKEN`, `OLLAMA_MODEL`, `QDRANT_URL`, ...)
+from the root `.env`; see `.env.example`. On an Apple Silicon Mac run it
+natively, as above, so the embedding model can use the GPU
+(`docs/runbook-demo-mac.md`). On Linux, `docker compose --profile ai up -d`
+builds it from `services/ai/Dockerfile` with CPU-only torch.
 
-```powershell
-ollama pull qwen3:32b
-```
-
-Start Qdrant, for example:
-
-```powershell
-docker start unisubmit-qdrant
-```
-
-If the container does not exist yet:
-
-```powershell
-docker run -d --name unisubmit-qdrant -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage qdrant/qdrant
-```
-
-Run the AI service:
-
-```powershell
-uvicorn main:app --host 127.0.0.1 --port 8001 --reload
-```
-
-Health check:
-
-`http://127.0.0.1:8001/health`
-
-The health response exposes the configured default model. It should show `qwen3:32b` when `.env` is loaded correctly.
+Health check: `http://127.0.0.1:8001/health`. It shows the configured default
+model and the embedding device.
 
 ## Guideline-first validation
 

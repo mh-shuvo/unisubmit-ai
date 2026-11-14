@@ -40,25 +40,38 @@ Academic rules are not manually retyped into the application. The official guide
 
 ## Queue
 Every uploaded version creates an AI job. A separate worker process,
-`python -m app.worker`, takes one job at a time until the queue is empty, then
-waits for new jobs. It never runs inside the web server, so pages stay
+`python -m unisubmit.worker`, takes one job at a time until the queue is empty,
+then waits for new jobs. It never runs inside the web server, so pages stay
 responsive while a thesis is validated. Failed jobs retry up to 3 times and do
 not block the rest of the queue. A job left running by a worker that stopped is
 put back in the queue.
 
-## Secrets
-Nothing has a default secret. Set these in `.env` before the first start, each
-generated with `openssl rand -hex 32`:
+## Repository layout
+
+| Path | What |
+|---|---|
+| `services/core/src/unisubmit/` | Web app (`main.py`), queue worker, `unisubmit` CLI, migrations |
+| `services/ai/src/unisubmit_ai/` | AI service: guideline parsing, RAG indexing, semantic validation |
+| `services/*/tests/` | Test suites; the core's `integration/` tests need PostgreSQL |
+| `pyproject.toml`, `uv.lock` | One uv workspace for both services, Python 3.13 |
+| `compose.yaml` | PostgreSQL, Qdrant, migrations, web app, worker; AI service under profile `ai` |
+
+## Configuration
+Everything is read from one `.env` in the repository root; copy
+`.env.example`. The web app, worker and CLI read `UNISUBMIT_*` variables, the
+AI service reads the plain names, and docker compose reads both. Nothing has a
+default secret; generate each with `openssl rand -hex 32`:
 
 | Variable | Used by |
 |---|---|
-| `APP_SECRET` | web app and worker: signs session cookies |
-| `AI_SERVICE_TOKEN` | web app, worker and AI service: every AI call needs it |
+| `UNISUBMIT_SECRET_KEY` | web app: signs session cookies |
+| `AI_SERVICE_TOKEN` | AI service, and compose passes it to the web app and worker |
+| `UNISUBMIT_AI_SERVICE_TOKEN` | web app and worker run natively; `.env.example` sets it to `${AI_SERVICE_TOKEN}` |
 | `POSTGRES_PASSWORD` | PostgreSQL in Docker (an existing volume keeps the password it was created with) |
 
-The AI service reads `ai_service/.env` when run natively, so `AI_SERVICE_TOKEN`
-goes there as well. Qdrant needs no key: the AI service connects to it by URL
-(`QDRANT_URL`), and its port is bound to `127.0.0.1`.
+A missing or weak secret stops the web app at startup with the variables to
+set. Qdrant needs no key: the AI service connects to it by URL (`QDRANT_URL`),
+and its port is bound to `127.0.0.1`.
 
 ## Run with Docker
 
@@ -66,10 +79,11 @@ goes there as well. Qdrant needs no key: the AI service connects to it by URL
 docker compose up -d --build
 ```
 
-This starts the web app, the queue worker, Qdrant and PostgreSQL. On an Apple
-Silicon Mac, Ollama and the AI service run natively so they can use the GPU:
-see [`docs/runbook-demo-mac.md`](docs/runbook-demo-mac.md). On a Linux host,
-run the AI service in Docker too:
+This starts PostgreSQL and Qdrant, runs `unisubmit migrate` once, then starts
+the web app and the queue worker. On an Apple Silicon Mac, Ollama and the AI
+service run natively so they can use the GPU: see
+[`docs/runbook-demo-mac.md`](docs/runbook-demo-mac.md). On a Linux host, run
+the AI service in Docker too:
 
 ```bash
 DOCKER_AI_SERVICE_URL=http://ai-service:8001 docker compose --profile ai up -d --build
@@ -83,60 +97,62 @@ Every port is bound to `127.0.0.1`, so nothing is reachable from another
 machine. Create the first Super Admin once:
 
 ```bash
-docker compose exec app python -m app.seed super-admin --email you@example.edu
+docker compose exec app unisubmit create-super-admin --email you@example.edu
 ```
 
-Add `python -m app.seed demo-data` for the sample faculty, programs and
-supervisors. Stop everything with `docker compose down` (add `-v` to also
-delete the database, Qdrant index and model cache).
+Add `docker compose exec app unisubmit seed-demo` for the sample faculty,
+programs and supervisors. Stop everything with `docker compose down` (add `-v`
+to also delete the database, Qdrant index and model cache).
 
-## Run Core System natively
-Recommended Python: 3.13
+## Database schema
+The schema is managed by Alembic. `unisubmit migrate` creates or upgrades it;
+the web app and the worker never create tables. A database created before
+v10.0 is adopted on its first `migrate`: its constraints are renamed to the
+migration names and it is stamped at the baseline, or refused with a list of
+differences if it does not match the models.
 
-```bat
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-python -m app.seed super-admin --email you@example.edu
-uvicorn app.main:app --reload --port 8000
-python -m app.worker
+After changing a model, add a migration and check it:
+
+```bash
+uv run alembic -c services/core/alembic.ini revision --autogenerate --rev-id 0002 -m "what changed"
+uv run alembic -c services/core/alembic.ini check
 ```
 
-The web server and the worker are two processes; run each in its own terminal.
+## Run natively (development)
+Install [uv](https://docs.astral.sh/uv/), then from the repository root:
 
-Public portal: http://127.0.0.1:8000
-Admin login: http://127.0.0.1:8000/admin/login
-
-There is no built-in admin account. `python -m app.seed super-admin` asks for a
-password of at least 12 characters.
-
-## Run Isolated AI Service
-The AI service is in `ai_service/` and is separate from the core system.
-
-It is designed for:
-- Ollama + Qwen3:14b
-- BGE-M3
-- Qdrant
-- RAG indexing/search/validation
-
-```bat
-cd ai_service
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8001
+```bash
+uv sync --all-packages
+cp .env.example .env                       # and fill it in
+uv run unisubmit migrate
+uv run unisubmit create-super-admin --email you@example.edu
+uv run uvicorn unisubmit.main:create_app --factory --reload --port 8000
+uv run python -m unisubmit.worker
+uv run uvicorn unisubmit_ai.main:app --host 127.0.0.1 --port 8001
 ```
+
+The web app, the worker and the AI service are separate processes; run each in
+its own terminal. There is no built-in admin account;
+`unisubmit create-super-admin` asks for a password of at least 12 characters.
 
 AI health: http://127.0.0.1:8001/health (open; every other route needs the
-`AI_SERVICE_TOKEN` as `Authorization: Bearer <token>`).
-The embedding model uses the GPU when one is visible (CUDA, or Apple MPS when
-run natively on a Mac); `/health` reports the device. Set `EMBEDDING_DEVICE`
-to override.
+`AI_SERVICE_TOKEN` as `Authorization: Bearer <token>`). The embedding model
+uses the GPU when one is visible (CUDA, or Apple MPS when run natively on a
+Mac); `/health` reports the device. Set `EMBEDDING_DEVICE` to override.
 
-## Development note
-SQLite and the database-backed queue are suitable for an MVP / single-server deployment. For larger production deployment, keep the same workflow and move to PostgreSQL with more worker processes.
+## Checks
+CI runs these on every pull request; run them before pushing:
 
+```bash
+uv run ruff format --check . && uv run ruff check .
+uv run mypy services/core/src services/ai/src
+uv run lint-imports
+TEST_DATABASE_URL=postgresql+psycopg://unisubmit:PASSWORD@127.0.0.1:5433/unisubmit_test uv run pytest
+```
+
+`TEST_DATABASE_URL` must name a disposable database whose name contains
+`test`: the suite drops and rebuilds its schema. Without it the database tests
+are skipped. `uv run pre-commit install` runs the same tools on every commit.
 
 ## v9 guideline-first rule parsing and validation
 
@@ -148,7 +164,7 @@ Same-type failures across multiple pages are consolidated while preserving affec
 
 ## v9.2 model configuration
 
-The default local LLM is now `qwen3:32b`. Run `ollama pull qwen3:32b` before starting the AI service. The AI service reads `ai_service/.env`; copy `ai_service/.env.example` to `ai_service/.env` and edit it whenever you want to switch models without changing code.
+The default local LLM is now `qwen3:32b`. Run `ollama pull qwen3:32b` before starting the AI service. The AI service reads `ai_service/.env`; copy `ai_service/.env.example` to `ai_service/.env` and edit it whenever you want to switch models without changing code. (Since v10.0 the AI service reads the root `.env`.)
 
 If upgrading with an existing SQLite database, previously saved AI profiles can still point to `qwen3:14b`. Update the Base model field in **Admin → AI Management** to `qwen3:32b` for those profiles.
 

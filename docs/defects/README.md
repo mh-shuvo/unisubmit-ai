@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-53 entries: 45 defects and 8 limitations. 13 open, 40 closed.
+56 entries: 48 defects and 8 limitations. 12 open, 44 closed.
 
 ---
 
@@ -29,7 +29,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [LIM-006](LIM-006.md) | The test suite runs only when invoked by hand | limitation | `observability-gap` | minor | Nothing; weakens the standing regression guarantee | 2026-11-02 |
 | [DEF-037](DEF-037.md) | Submitting the new-submission form twice creates two submissions and two jobs | defect | `job-coordination` | major | Nothing; wastes a model run per double-click | 2026-11-14 |
 | [DEF-038](DEF-038.md) | Guideline parsing and indexing run inside the admin's HTTP request for up to 25 minutes | defect | `timeout-misalignment` | major | Any deployment behind a proxy with a shorter timeout | 2026-11-14 |
-| [DEF-039](DEF-039.md) | Model changes never reach an existing database, because there are no migrations | defect | `schema-drift` | major | Every schema change, including the constraints behind DEF-026 and DEF-037 | 2026-11-14 |
 | [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | minor | Nothing; matters after a database leak | 2026-11-14 |
 | [DEF-041](DEF-041.md) | Forms carry no CSRF token and logout is a GET | defect | `insecure-default` | minor | Nothing; `SameSite=Lax` covers the common case | 2026-11-14 |
 | [DEF-042](DEF-042.md) | File paths are stored as absolute, environment-specific paths | defect | `runtime-environment` | major | Running the web app natively against the Docker database; moving storage | 2026-11-14 |
@@ -86,12 +85,17 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-036](DEF-036.md) | The queue worker swallows its own failures | defect | `observability-gap` | Checking | v9.14, `4848c62` | `test_failure_after_a_database_error_is_recorded_and_logged` |
 | [LIM-008](LIM-008.md) | Docker on macOS cannot reach the Apple GPU, so containerised embeddings run on the CPU | limitation | `runtime-environment` | n/a | v9.14, `4848c62` | `EmbeddingDeviceTests` |
 | [DEF-045](DEF-045.md) | The web app and the worker both create the schema, and on an empty database the worker crashes | defect | `job-coordination` | Timing/Serialisation | v9.14, `4848c62` (introduced and fixed before merge) | `test_worker_waits_for_the_schema_instead_of_creating_it` |
+| [DEF-039](DEF-039.md) | Model changes never reach an existing database, because there are no migrations | defect | `schema-drift` | Function | v10.0, `b0367f6` | `test_migrations.py` |
+| [DEF-046](DEF-046.md) | The upload lock is released before the new version's job exists, so two quick uploads can still both be queued | defect | `job-coordination` | Timing/Serialisation | v10.0, `39ebc9b` | `test_concurrent_uploads_never_share_a_version_number` |
+| [DEF-047](DEF-047.md) | Every HTML page fails with 500 after the Starlette 1.x upgrade, and no test rendered a page | defect | `dependency-api-drift` | Interface | v10.0, `64556cd` (introduced and fixed before merge) | `PageRenderingTests` |
+| [DEF-048](DEF-048.md) | In the uv-built images, every console script points at an interpreter that does not exist | defect | `runtime-environment` | Build/Package | v10.0, `e884275` (introduced and fixed before merge) | none |
 
 `DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are
 not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
 `CHANGELOG_v9_13.md`; `DEF-024` to `DEF-036`, `DEF-045` and `LIM-008` (Phase 0 of the
 restructuring plan, branch `phase-0-demo-critical-fixes`) in
-`CHANGELOG_v9_14.md`. `DEF-017` to `DEF-019` are on branch
+`CHANGELOG_v9_14.md`; `DEF-039` and `DEF-046` to `DEF-048` (Phase 1, branch
+`phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---
@@ -135,8 +139,8 @@ Output that is only partly specified, and a context window that truncates from
 the front without saying so. [DEF-014](DEF-014.md) is the case worth building
 the section around.
 
-**T5 — Integration brittleness** (12)
-[DEF-004](DEF-004.md) · [DEF-005](DEF-005.md) · [DEF-007](DEF-007.md) · [DEF-015](DEF-015.md) · [DEF-016](DEF-016.md) · [LIM-002](LIM-002.md) · [LIM-003](LIM-003.md) · [DEF-031](DEF-031.md) · [DEF-032](DEF-032.md) · [DEF-035](DEF-035.md) · [DEF-038](DEF-038.md) · [LIM-008](LIM-008.md)
+**T5 — Integration brittleness** (13)
+[DEF-004](DEF-004.md) · [DEF-005](DEF-005.md) · [DEF-007](DEF-007.md) · [DEF-015](DEF-015.md) · [DEF-016](DEF-016.md) · [LIM-002](LIM-002.md) · [LIM-003](LIM-003.md) · [DEF-031](DEF-031.md) · [DEF-032](DEF-032.md) · [DEF-035](DEF-035.md) · [DEF-038](DEF-038.md) · [LIM-008](LIM-008.md) · [DEF-047](DEF-047.md)
 
 Configuration, timeouts, dependency drift and contention. The timeout
 misalignment appears three times on three call paths, which is the argument for
@@ -151,8 +155,8 @@ thesis submission, and [DEF-021](DEF-021.md) is [LIM-006](LIM-006.md)
 demonstrated: a regression its own test would have caught, undetected for
 sixteen days because nothing runs that test.
 
-**T7 — Concurrency and job lifecycle** (7)
-[DEF-024](DEF-024.md) · [DEF-025](DEF-025.md) · [DEF-026](DEF-026.md) · [DEF-033](DEF-033.md) · [DEF-034](DEF-034.md) · [DEF-037](DEF-037.md) · [DEF-045](DEF-045.md)
+**T7 — Concurrency and job lifecycle** (8)
+[DEF-024](DEF-024.md) · [DEF-025](DEF-025.md) · [DEF-026](DEF-026.md) · [DEF-033](DEF-033.md) · [DEF-034](DEF-034.md) · [DEF-037](DEF-037.md) · [DEF-045](DEF-045.md) · [DEF-046](DEF-046.md)
 
 Where work runs and who owns it. The event loop was shared by requests and a
 worker that did not yield; uploads were numbered without a lock; a job had no
@@ -160,10 +164,12 @@ owner once its process died. [DEF-026](DEF-026.md) and [DEF-034](DEF-034.md)
 are the pair to write up together: refusing uploads while a job is active is
 only safe once every active job is guaranteed to end. [DEF-045](DEF-045.md)
 is the cautionary one: a regression introduced by the fix for DEF-024, found
-only by booting the deployment from empty volumes.
+only by booting the deployment from empty volumes. [DEF-046](DEF-046.md) is
+the DEF-026 fix's own gap: the lock was released one commit too early, and a
+concurrency test hid it until a faster database driver changed the timing.
 
-**T8 — Deployment readiness: secure defaults, isolation and schema lifecycle** (9)
-[DEF-027](DEF-027.md) · [DEF-028](DEF-028.md) · [DEF-029](DEF-029.md) · [DEF-030](DEF-030.md) · [DEF-039](DEF-039.md) · [DEF-040](DEF-040.md) · [DEF-041](DEF-041.md) · [DEF-042](DEF-042.md) · [DEF-043](DEF-043.md)
+**T8 — Deployment readiness: secure defaults, isolation and schema lifecycle** (10)
+[DEF-027](DEF-027.md) · [DEF-028](DEF-028.md) · [DEF-029](DEF-029.md) · [DEF-030](DEF-030.md) · [DEF-039](DEF-039.md) · [DEF-040](DEF-040.md) · [DEF-041](DEF-041.md) · [DEF-042](DEF-042.md) · [DEF-043](DEF-043.md) · [DEF-048](DEF-048.md)
 
 What it takes to run the system somewhere other than the developer's laptop.
 Four of these were defaults that kept the system running insecurely without
@@ -175,7 +181,7 @@ anyone choosing it, which is the argument for failing closed at startup.
 
 Maintained by hand. Update them in the same edit that adds or closes an entry.
 
-### By class, all 53 entries
+### By class, all 56 entries
 
 | Class | Count |
 |-------|-------|
@@ -183,7 +189,7 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `insecure-default` | 6 |
 | `observability-gap` | 6 |
 | `llm-output-contract` | 4 |
-| `job-coordination` | 4 |
+| `job-coordination` | 5 |
 | `event-loop-blocking` | 3 |
 | `config-resolution` | 3 |
 | `timeout-misalignment` | 3 |
@@ -192,35 +198,35 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `llm-context-budget` | 2 |
 | `resource-contention` | 2 |
 | `lossy-normalisation` | 2 |
-| `dependency-api-drift` | 2 |
-| `runtime-environment` | 2 |
+| `dependency-api-drift` | 3 |
+| `runtime-environment` | 3 |
 | `fail-open` | 1 |
 | `schema-drift` | 1 |
-| **Total** | **53** |
+| **Total** | **56** |
 
-### By ODC defect type, the 45 `DEF` entries
+### By ODC defect type, the 48 `DEF` entries
 
-Limitations carry no ODC triple, so these sum to 45 rather than 53.
+Limitations carry no ODC triple, so these sum to 48 rather than 56.
 
 | Defect type | Count |
 |-------------|-------|
 | Algorithm/Method | 12 |
 | Checking | 12 |
-| Timing/Serialisation | 8 |
+| Timing/Serialisation | 9 |
 | Assignment/Initialisation | 7 |
 | Function | 3 |
-| Interface | 1 |
-| Build/Package | 1 |
+| Interface | 2 |
+| Build/Package | 2 |
 | Relationship | 1 |
-| **Total** | **45** |
+| **Total** | **48** |
 
 | Qualifier | Count |
 |-----------|-------|
-| Incorrect | 27 |
+| Incorrect | 30 |
 | Missing | 16 |
 | Extraneous | 2 |
 
-### By trigger, the 45 `DEF` entries
+### By trigger, the 48 `DEF` entries
 
 The trigger is also the detection method: how the defect actually surfaced.
 
@@ -230,12 +236,12 @@ The trigger is also the detection method: how the defect actually surfaced.
 | Design Conformance | 8 |
 | Normal Mode | 5 |
 | Workload/Stress | 2 |
-| Hardware/Software Configuration | 2 |
-| Concurrency | 2 |
-| Lateral Compatibility | 1 |
+| Hardware/Software Configuration | 3 |
+| Concurrency | 3 |
+| Lateral Compatibility | 2 |
 | Complex Path | 1 |
 | Rare Situation | 1 |
-| **Total** | **45** |
+| **Total** | **48** |
 
 Worth noting when this table is quoted: 8 of the first 23 were found by
 comparing behaviour against the guideline's intent, and all 8 of those are in
@@ -249,14 +255,14 @@ have revealed them; the exceptions, [DEF-032](DEF-032.md) and
 [DEF-044](DEF-044.md), would have shown up only as a wrong citation or a
 crash on an unusual model response.
 
-### By severity, all 53 entries
+### By severity, all 56 entries
 
 | Severity | Count |
 |----------|-------|
-| blocking | 16 |
-| major | 27 |
+| blocking | 18 |
+| major | 28 |
 | minor | 10 |
-| **Total** | **53** |
+| **Total** | **56** |
 
 ---
 
