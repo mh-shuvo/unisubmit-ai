@@ -8,6 +8,7 @@ DEF-030: internal services were published on every host interface with a
 DEF-031: the Qdrant image tag floated with `latest`.
 DEF-024: the queue worker runs as its own service.
 """
+
 import os
 import re
 import unittest
@@ -41,7 +42,10 @@ class SecretSettingsTests(unittest.TestCase):
 
     def test_published_placeholder_secrets_are_rejected(self):
         """DEF-027: the values shipped in .env.example and compose must not run."""
-        for placeholder in ("change-this-secret-in-production", "replace-with-a-long-random-secret"):
+        for placeholder in (
+            "change-this-secret-in-production",
+            "replace-with-a-long-random-secret",
+        ):
             with self.subTest(placeholder=placeholder), self.assertRaises(ValidationError):
                 settings_from(APP_SECRET=placeholder, AI_SERVICE_TOKEN=STRONG)
 
@@ -64,8 +68,9 @@ class AdminBootstrapTests(unittest.TestCase):
     """DEF-028: the first admin is created deliberately, with a chosen password."""
 
     def setUp(self):
-        engine = create_engine("sqlite://", poolclass=StaticPool,
-                               connect_args={"check_same_thread": False})
+        engine = create_engine(
+            "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+        )
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.addCleanup(self.db.close)
@@ -93,7 +98,11 @@ class AdminBootstrapTests(unittest.TestCase):
 
         admin = self.db.query(AdminUser).one()
         self.assertEqual(
-            (admin.email, admin.role, verify_password("a long chosen passphrase", admin.password_hash)),
+            (
+                admin.email,
+                admin.role,
+                verify_password("a long chosen passphrase", admin.password_hash),
+            ),
             ("admin@example.edu", "SUPER_ADMIN", True),
         )
 

@@ -3,6 +3,7 @@
 Importing this module first sets the environment the app needs, so the tests
 never read secrets or a database URL from the developer's `.env`.
 """
+
 import os
 import shutil
 import sys

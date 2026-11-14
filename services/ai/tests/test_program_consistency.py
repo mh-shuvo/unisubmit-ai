@@ -6,17 +6,16 @@ exclusively other levels is a mismatch. The vocabulary covers formal
 (B.Sc./M.Sc./Doctor of Philosophy) and loose (Bachelor's/Masters/PhD)
 wording.
 """
+
 import unittest
 
 from unisubmit_ai import main as service
 
 DUAL_LEVEL = (
-    "This template applies to Bachelor of Science (B.Sc.) and "
-    "Master of Science (M.Sc.) theses."
+    "This template applies to Bachelor of Science (B.Sc.) and Master of Science (M.Sc.) theses."
 )
 DUAL_LEVEL_LOOSE = (
-    "This template applies to the Bachelor of Science and the "
-    "Masters programme alike."
+    "This template applies to the Bachelor of Science and the Masters programme alike."
 )
 BACHELOR_ONLY = "Guideline for the Bachelor of Science thesis."
 MASTER_ONLY = "Guideline for the Master of Science thesis."
@@ -59,9 +58,7 @@ class ProgramGuidelineConsistencyTests(unittest.TestCase):
         self.assertTrue(check("B.Sc. in CSE", DOCTORAL_ONLY)["mismatch"])
 
     def test_guideline_without_degree_statement_passes(self):
-        self.assertFalse(
-            check("M.Sc. in CSE", "Use A4 paper with 25 mm margins.")["mismatch"]
-        )
+        self.assertFalse(check("M.Sc. in CSE", "Use A4 paper with 25 mm margins.")["mismatch"])
 
 
 if __name__ == "__main__":

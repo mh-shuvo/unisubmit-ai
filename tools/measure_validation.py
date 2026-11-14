@@ -11,6 +11,7 @@ while the worker is validating (LIM-003).
 
 Restructuring plan task P0.11: the measured time sets RAG_VALIDATE_TIMEOUT.
 """
+
 import argparse
 import asyncio
 import json
@@ -48,8 +49,11 @@ def main() -> int:
             print(f"Template version {args.template_version} not found.", file=sys.stderr)
             return 1
         profile = next(
-            (p for p in tv.template.program.ai_profiles
-             if p.submission_type == tv.template.submission_type),
+            (
+                p
+                for p in tv.template.program.ai_profiles
+                if p.submission_type == tv.template.submission_type
+            ),
             None,
         )
         model = args.model or (profile.base_model if profile else settings.ollama_model)
@@ -59,7 +63,9 @@ def main() -> int:
         started = time.perf_counter()
         run_rules(tv.rules, info)
         format_results = (
-            validate_all_profile_rules(fmt_profile, info) if tv.format_profile_status == "Active" else []
+            validate_all_profile_rules(fmt_profile, info)
+            if tv.format_profile_status == "Active"
+            else []
         )
         deterministic_s = round(time.perf_counter() - started, 2)
         payload = semantic_validation_payload(
@@ -71,23 +77,30 @@ def main() -> int:
     ai = asyncio.run(rag_validate(settings.ai_service_url, payload))
     semantic_s = round(time.perf_counter() - started, 2)
 
-    print(json.dumps({
-        "machine": f"{platform.system()} {platform.machine()}",
-        "model": model,
-        "embedding_device": ((service.get("data") or {}).get("embedding") or {}).get("device"),
-        "pdf": args.pdf.name,
-        "pages": info.get("page_count"),
-        "deterministic_rules": len(format_results) + len(tv.rules),
-        "semantic_requirements": len(payload["explicit_requirements"]),
-        "semantic_batches": ai.get("semantic_batches"),
-        "semantic_batches_failed": ai.get("semantic_batches_failed"),
-        "seconds": {
-            "inspect_pdf": inspect_s,
-            "deterministic": deterministic_s,
-            "semantic_ai": semantic_s,
-            "total": round(inspect_s + deterministic_s + semantic_s, 2),
-        },
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "machine": f"{platform.system()} {platform.machine()}",
+                "model": model,
+                "embedding_device": ((service.get("data") or {}).get("embedding") or {}).get(
+                    "device"
+                ),
+                "pdf": args.pdf.name,
+                "pages": info.get("page_count"),
+                "deterministic_rules": len(format_results) + len(tv.rules),
+                "semantic_requirements": len(payload["explicit_requirements"]),
+                "semantic_batches": ai.get("semantic_batches"),
+                "semantic_batches_failed": ai.get("semantic_batches_failed"),
+                "seconds": {
+                    "inspect_pdf": inspect_s,
+                    "deterministic": deterministic_s,
+                    "semantic_ai": semantic_s,
+                    "total": round(inspect_s + deterministic_s + semantic_s, 2),
+                },
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

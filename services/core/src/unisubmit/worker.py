@@ -6,6 +6,7 @@ It used to run inside the web process, where the PDF analysis, report
 rendering and SMTP work of every job froze all pages while it ran (DEF-024).
 One worker process takes one job at a time, matching the single local model.
 """
+
 import asyncio
 import logging
 import signal
@@ -30,11 +31,7 @@ STALE_AFTER = timedelta(seconds=RAG_VALIDATE_TIMEOUT + 300)
 def requeue_stale_jobs(db) -> int:
     """Put jobs abandoned by a dead worker back in the queue (DEF-034)."""
     cutoff = datetime.utcnow() - STALE_AFTER
-    stale = (
-        db.query(AIJob)
-        .filter(AIJob.status == "PROCESSING", AIJob.started_at < cutoff)
-        .all()
-    )
+    stale = db.query(AIJob).filter(AIJob.status == "PROCESSING", AIJob.started_at < cutoff).all()
     for job in stale:
         job.status = "RETRYING"
         job.error_message = "The worker stopped before finishing this job; requeued."
@@ -138,7 +135,9 @@ async def run_forever() -> None:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     task = asyncio.current_task()
     try:
         # Docker stops containers with SIGTERM; Ctrl+C is handled by asyncio.run.

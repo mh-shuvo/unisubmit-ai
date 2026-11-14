@@ -121,8 +121,7 @@ async def _check_ollama() -> tuple[bool, str]:
         )
         if not model_ready:
             return False, (
-                f"Model '{DEFAULT_LLM_MODEL}' not found. "
-                f"Installed: {installed or ['(none)']}"
+                f"Model '{DEFAULT_LLM_MODEL}' not found. Installed: {installed or ['(none)']}"
             )
         return True, f"model='{DEFAULT_LLM_MODEL}'  url={OLLAMA_URL}"
     except httpx.ConnectError:
@@ -134,9 +133,7 @@ async def _check_ollama() -> tuple[bool, str]:
 def _check_qdrant_sync() -> tuple[bool, str]:
     """Try to connect to Qdrant and list collections."""
     try:
-        client = QdrantClient(
-            url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None
-        )
+        client = QdrantClient(url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None)
         info = client.info()
         client.get_collections()
         return True, f"server={info.version}  url={QDRANT_URL}"
@@ -201,9 +198,7 @@ async def startup_event():
     qdrant_ok, qdrant_detail = await asyncio.to_thread(_check_qdrant_sync)
     _preflight_banner("Qdrant vector DB", qdrant_ok, qdrant_detail)
     if qdrant_ok:
-        qdrant_client = QdrantClient(
-            url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None
-        )
+        qdrant_client = QdrantClient(url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY") or None)
         qdrant_status = "ready"
         qdrant_error = None
     else:
@@ -418,9 +413,7 @@ def retrieve_chunks(collection_name: str, query: str, limit: int = 5) -> list[di
             timeout=30,
         )
         response.raise_for_status()
-        return [
-            ScoredPoint.model_validate(point) for point in response.json()["result"]
-        ]
+        return [ScoredPoint.model_validate(point) for point in response.json()["result"]]
 
     if not callable(getattr(qdrant_client, "query_points", None)):
         points = legacy_search()
@@ -438,9 +431,7 @@ def retrieve_chunks(collection_name: str, query: str, limit: int = 5) -> list[di
                 raise
             # A missing collection also produces 404. Never mask it as an API mismatch.
             qdrant_client.get_collection(collection_name=collection_name)
-            logger.warning(
-                "Qdrant query endpoint unavailable; using legacy dense search"
-            )
+            logger.warning("Qdrant query endpoint unavailable; using legacy dense search")
             points = legacy_search()
 
     hits = []
@@ -549,9 +540,7 @@ async def health():
             response = await client.get(OLLAMA_URL.rstrip("/") + "/api/tags")
             response.raise_for_status()
 
-            models = [
-                model.get("name", "") for model in response.json().get("models", [])
-            ]
+            models = [model.get("name", "") for model in response.json().get("models", [])]
 
             ollama_status = "ready"
 
@@ -559,9 +548,7 @@ async def health():
         ollama_error = str(e)
 
     rag_ready = (
-        ollama_status == "ready"
-        and embedding_status == "ready"
-        and qdrant_status == "ready"
+        ollama_status == "ready" and embedding_status == "ready" and qdrant_status == "ready"
     )
 
     return {
@@ -614,9 +601,7 @@ async def embed(request: EmbeddingRequest):
 @app.get("/rag/collections")
 async def rag_collections():
     if qdrant_client is None or qdrant_status != "ready":
-        raise HTTPException(
-            status_code=503, detail=f"Qdrant unavailable: {qdrant_error}"
-        )
+        raise HTTPException(status_code=503, detail=f"Qdrant unavailable: {qdrant_error}")
 
     result = await asyncio.to_thread(qdrant_client.get_collections)
 
@@ -657,9 +642,7 @@ async def index_template(
     pdf: UploadFile = File(...),
 ):
     if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400, detail="Only PDF template files are accepted."
-        )
+        raise HTTPException(status_code=400, detail="Only PDF template files are accepted.")
 
     collection_name = resolve_collection(
         collection, department, program, submission_type, template_version
@@ -718,9 +701,7 @@ async def index_template(
         points = []
 
         for payload, vector in zip(payloads, vectors):
-            points.append(
-                PointStruct(id=str(uuid.uuid4()), vector=vector, payload=payload)
-            )
+            points.append(PointStruct(id=str(uuid.uuid4()), vector=vector, payload=payload))
 
         batch_size = 64
 
@@ -911,9 +892,7 @@ def _validation_payload(text):
     if not isinstance(results, list) or any(not isinstance(x, dict) for x in results):
         raise ValueError("semantic_results must be an array of objects")
     suggestions = payload.get("improvement_suggestions", [])
-    if not isinstance(suggestions, list) or any(
-        not isinstance(x, str) for x in suggestions
-    ):
+    if not isinstance(suggestions, list) or any(not isinstance(x, str) for x in suggestions):
         raise ValueError("improvement_suggestions must be an array of strings")
     if not isinstance(payload.get("grounding_note", ""), str):
         raise ValueError("grounding_note must be a string")
@@ -953,9 +932,7 @@ async def rag_validate(request: ValidateRAGRequest):
         if not isinstance(raw, dict):
             continue
         req = dict(raw)
-        req["semantic_id"] = str(
-            req.get("semantic_id") or req.get("rule_id") or f"SEM-{idx:03d}"
-        )
+        req["semantic_id"] = str(req.get("semantic_id") or req.get("rule_id") or f"SEM-{idx:03d}")
         req["requirement"] = str(req.get("requirement") or "").strip()
         req["target_section"] = str(
             req.get("target_section") or req.get("source_section") or ""
@@ -975,9 +952,7 @@ async def rag_validate(request: ValidateRAGRequest):
         if severity == "Ignore" or req.get("enabled") is False:
             continue
         if severity not in {"Mandatory", "Warning", "Recommendation"}:
-            raise HTTPException(
-                status_code=422, detail=f"Invalid semantic severity: {severity}"
-            )
+            raise HTTPException(status_code=422, detail=f"Invalid semantic severity: {severity}")
         req["final_severity"] = severity
         if req["requirement"]:
             explicit.append(req)
@@ -992,9 +967,7 @@ async def rag_validate(request: ValidateRAGRequest):
         used_ids.add(semantic_id)
         # Only carry targeted evidence when a section was actually isolated. An
         # empty value would repeat the whole document once per rule.
-        section_text = _extract_target_section(
-            request.student_text, req.get("target_section", "")
-        )
+        section_text = _extract_target_section(request.student_text, req.get("target_section", ""))
         if section_text:
             req["student_section_text"] = section_text
         else:
@@ -1007,17 +980,13 @@ async def rag_validate(request: ValidateRAGRequest):
         )
         seen = {(h.get("page"), h.get("text")) for h in hits}
         for req in explicit[:40]:
-            more = await asyncio.to_thread(
-                retrieve_chunks, collection_name, req["requirement"], 3
-            )
+            more = await asyncio.to_thread(retrieve_chunks, collection_name, req["requirement"], 3)
             for h in more:
                 k = (h.get("page"), h.get("text"))
                 if k not in seen:
                     seen.add(k)
                     hits.append(h)
-        hits = sorted(hits, key=lambda x: x.get("score", 0), reverse=True)[
-            :SEMANTIC_CONTEXT_CHUNKS
-        ]
+        hits = sorted(hits, key=lambda x: x.get("score", 0), reverse=True)[:SEMANTIC_CONTEXT_CHUNKS]
     except Exception as e:
         logger.exception("RAG retrieval failed collection=%s", collection_name)
         code = 404 if getattr(e, "status_code", None) == 404 else 503
@@ -1034,8 +1003,7 @@ async def rag_validate(request: ValidateRAGRequest):
         for i, h in enumerate(hits, 1)
     )
     batches = [
-        explicit[i : i + SEMANTIC_BATCH_SIZE]
-        for i in range(0, len(explicit), SEMANTIC_BATCH_SIZE)
+        explicit[i : i + SEMANTIC_BATCH_SIZE] for i in range(0, len(explicit), SEMANTIC_BATCH_SIZE)
     ] or [[]]
     returned = {}
     suggestion_pool = []
@@ -1065,7 +1033,7 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
             raise HTTPException(
                 status_code=503,
                 detail=f"Local LLM unavailable on semantic batch {batch_no}/{len(batches)}: "
-                       f"{type(e).__name__}: {e}".rstrip(': '),
+                f"{type(e).__name__}: {e}".rstrip(": "),
             ) from e
         try:
             payload = _validation_payload(raw)
@@ -1155,17 +1123,13 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
                 ).strip()[:800],
                 "confidence": item.get("confidence"),
                 "source_type": req.get("source_type")
-                or (
-                    "Manual Semantic Rule" if req.get("manual") else "Guideline-derived"
-                ),
+                or ("Manual Semantic Rule" if req.get("manual") else "Guideline-derived"),
                 "affected_pages": [],
                 "occurrences": [],
             }
         )
     suggestions = [
-        str(x).strip()
-        for x in (payload.get("improvement_suggestions") or [])
-        if str(x).strip()
+        str(x).strip() for x in (payload.get("improvement_suggestions") or []) if str(x).strip()
     ]
     grounding = str(payload.get("grounding_note") or "").strip()
     overall = (
@@ -1173,33 +1137,19 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
         if not semantic
         else (
             "FAIL"
-            if any(
-                r["severity"] == "Mandatory" and r["status"] == "FAIL" for r in semantic
-            )
-            else (
-                "PARTIAL"
-                if any(r["status"] == "NOT VERIFIED" for r in semantic)
-                else "PASS"
-            )
+            if any(r["severity"] == "Mandatory" and r["status"] == "FAIL" for r in semantic)
+            else ("PARTIAL" if any(r["status"] == "NOT VERIFIED" for r in semantic) else "PASS")
         )
     )
     comp = [f"- Status: {overall}"]
     corrections = []
     for r in semantic:
-        src = (
-            f"Page {r['source_page']}" if r.get("source_page") else "approved guideline"
-        )
+        src = f"Page {r['source_page']}" if r.get("source_page") else "approved guideline"
         comp.append(f"- **{r['status']} - {r['name']}**: {r['message']} [{src}]")
-        if (
-            r["severity"] == "Mandatory"
-            and r["status"] == "FAIL"
-            and r.get("correction")
-        ):
+        if r["severity"] == "Mandatory" and r["status"] == "FAIL" and r.get("correction"):
             corrections.append(f"- {r['correction']} [{src}]")
     if not corrections:
-        corrections = [
-            "- No guideline-supported mandatory semantic correction was reported."
-        ]
+        corrections = ["- No guideline-supported mandatory semantic correction was reported."]
     if not suggestions:
         suggestions = ["No additional improvement suggestion was generated."]
     if failed_batches:
@@ -1215,10 +1165,7 @@ PARSED SEMANTIC REQUIREMENTS WITH TARGETED STUDENT EVIDENCE:\n{json.dumps(batch,
         + "\n\n## IMPROVEMENT SUGGESTIONS\n"
         + "\n".join("- " + x for x in suggestions)
         + "\n\n## GROUNDING NOTE\n- "
-        + (
-            grounding
-            or "Retrieved context was used for the rule-by-rule semantic review."
-        )
+        + (grounding or "Retrieved context was used for the rule-by-rule semantic review.")
     )
     return {
         "status": "success",
@@ -1259,9 +1206,7 @@ def _normalize_rule_profile(profile: dict) -> dict:
         "deterministic_rules": [],
         "semantic_requirements": [],
         "cover_page": (
-            profile.get("cover_page")
-            if isinstance(profile.get("cover_page"), dict)
-            else {}
+            profile.get("cover_page") if isinstance(profile.get("cover_page"), dict) else {}
         ),
     }
     allowed = {
@@ -1381,12 +1326,8 @@ def _extract_cover_candidate(doc: fitz.Document) -> dict:
                     "y0": round(y0 / rect.height, 4),
                     "x1": round(x1 / rect.width, 4),
                     "y1": round(y1 / rect.height, 4),
-                    "font_size": round(
-                        max([float(sp.get("size", 0)) for sp in spans] or [0]), 1
-                    ),
-                    "bold": any(
-                        "bold" in str(sp.get("font", "")).lower() for sp in spans
-                    ),
+                    "font_size": round(max([float(sp.get("size", 0)) for sp in spans] or [0]), 1),
+                    "bold": any("bold" in str(sp.get("font", "")).lower() for sp in spans),
                 }
             )
     page_text = (page.get_text("text") or "").lower()
@@ -1511,9 +1452,7 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
             )
         # margins, supports "Left: 1.5 in" and "Right, Top, Bottom: 1.0 in"
         for ln in lines:
-            ml = re.search(
-                r"(?i)\bleft\s*:\s*(\d+(?:\.\d+)?)\s*(in(?:ch(?:es)?)?|mm)\b", ln
-            )
+            ml = re.search(r"(?i)\bleft\s*:\s*(\d+(?:\.\d+)?)\s*(in(?:ch(?:es)?)?|mm)\b", ln)
             if ml:
                 add(
                     {
@@ -1533,10 +1472,7 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
             if multi:
                 value = mm(multi.group(3), multi.group(4))
                 names = [
-                    x
-                    for x in re.findall(
-                        r"(?i)\b(left|right|top|bottom)\b", ln.split(":", 1)[0]
-                    )
+                    x for x in re.findall(r"(?i)\b(left|right|top|bottom)\b", ln.split(":", 1)[0])
                 ]
                 for side in names:
                     add(
@@ -1585,9 +1521,7 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
                 "body text": "body_text",
             }[label.lower()]
             size = re.search(r"(\d+(?:\.\d+)?)\s*(?:pt|point)", spec, re.I)
-            font = re.search(
-                r"(?i)\b(Times\s+New\s+Roman|Arial|Calibri|Cambria)\b", spec
-            )
+            font = re.search(r"(?i)\b(Times\s+New\s+Roman|Arial|Calibri|Cambria)\b", spec)
             if label.lower() == "body text":
                 if size:
                     add(
@@ -1595,9 +1529,7 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
                             "type": "body_font_size_pt",
                             "target": "body_text",
                             "value": (
-                                float(size.group(1))
-                                if "." in size.group(1)
-                                else int(size.group(1))
+                                float(size.group(1)) if "." in size.group(1) else int(size.group(1))
                             ),
                             "mandatory": True,
                             "source_page": page,
@@ -1661,9 +1593,7 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
                             "type": "heading_font_size_pt",
                             "target": target,
                             "value": (
-                                float(size.group(1))
-                                if "." in size.group(1)
-                                else int(size.group(1))
+                                float(size.group(1)) if "." in size.group(1) else int(size.group(1))
                             ),
                             "mandatory": True,
                             "source_page": page,
@@ -1792,18 +1722,12 @@ def _standard_text_rule_fallback(page_items: list[dict]) -> dict:
                     )
         # explicit template headings imply required document structure
         for ln in lines:
-            if re.fullmatch(
-                r"(?i)(ABSTRACT|ACKNOWLEDGMENTS?|TABLE OF CONTENTS|REFERENCES)", ln
-            ):
+            if re.fullmatch(r"(?i)(ABSTRACT|ACKNOWLEDGMENTS?|TABLE OF CONTENTS|REFERENCES)", ln):
                 heading_names.add(ln.title())
             if re.match(r"(?i)^CHAPTER\s+\d+\s*:\s*.+", ln):
-                heading_names.add(
-                    re.sub(r"(?i)^CHAPTER\s+\d+\s*:\s*", "", ln).strip().title()
-                )
+                heading_names.add(re.sub(r"(?i)^CHAPTER\s+\d+\s*:\s*", "", ln).strip().title())
         # figure/table caption placement instructions
-        if re.search(
-            r"(?i)(figure|image|diagram).{0,100}caption.{0,100}(below|under)", text
-        ):
+        if re.search(r"(?i)(figure|image|diagram).{0,100}caption.{0,100}(below|under)", text):
             add(
                 {
                     "type": "figure_caption_position",
@@ -1883,8 +1807,7 @@ def _merge_profiles(primary: dict, fallback: dict) -> dict:
     for r in fb.get("deterministic_rules", []):
         _add_rule_unique(merged["deterministic_rules"], r)
     merged["semantic_requirements"] = _dedupe_semantic_rules(
-        (merged.get("semantic_requirements") or [])
-        + (fb.get("semantic_requirements") or [])
+        (merged.get("semantic_requirements") or []) + (fb.get("semantic_requirements") or [])
     )
     return merged
 
@@ -1944,15 +1867,13 @@ def _coverage_audit(page_items: list[dict], profile: dict) -> dict:
         (
             "margins",
             "margin" in text,
-            {"margin_left_mm", "margin_right_mm", "margin_top_mm", "margin_bottom_mm"}
-            & types,
+            {"margin_left_mm", "margin_right_mm", "margin_top_mm", "margin_bottom_mm"} & types,
         ),
         ("line spacing", "line spacing" in text, {"line_spacing"} & types),
         (
             "chapter/heading styles",
             ("heading 1" in text or "chapter title" in text),
-            {"heading_font_size_pt", "heading_alignment", "heading_bold_required"}
-            & types,
+            {"heading_font_size_pt", "heading_alignment", "heading_bold_required"} & types,
         ),
         (
             "abstract word limit",
@@ -1983,9 +1904,7 @@ def _guideline_payload(answer):
     if not isinstance(obj, dict):
         raise ValueError("Guideline response must be a JSON object")
     for key in ("deterministic_rules", "semantic_requirements"):
-        if not isinstance(obj.get(key), list) or any(
-            not isinstance(r, dict) for r in obj[key]
-        ):
+        if not isinstance(obj.get(key), list) or any(not isinstance(r, dict) for r in obj[key]):
             raise ValueError(f"{key} must be an array of objects")
     return obj
 
@@ -2056,9 +1975,7 @@ async def extract_guideline_profile(
 ):
     """Parse the approved guideline PDF first, then derive validation rules from its explicit text."""
     if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400, detail="Only PDF guideline files are accepted."
-        )
+        raise HTTPException(status_code=400, detail="Only PDF guideline files are accepted.")
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp:
@@ -2076,7 +1993,7 @@ async def extract_guideline_profile(
             t = (page.get_text("text") or "").strip()
             if t:
                 page_items.append({"page": i + 1, "text": t})
-                page_text.append(f"[GUIDELINE PAGE {i+1}]\n{t}")
+                page_text.append(f"[GUIDELINE PAGE {i + 1}]\n{t}")
         if not page_text:
             raise HTTPException(
                 status_code=400,
@@ -2215,9 +2132,7 @@ async def extract_format_profile(request: FormatProfileRequest):
     seen = set()
     for q in queries:
         try:
-            for h in await asyncio.to_thread(
-                retrieve_chunks, collection_name, q, request.limit
-            ):
+            for h in await asyncio.to_thread(retrieve_chunks, collection_name, q, request.limit):
                 key = (h.get("page"), h.get("text"))
                 if key not in seen:
                     seen.add(key)
@@ -2227,7 +2142,7 @@ async def extract_format_profile(request: FormatProfileRequest):
     merged = sorted(merged, key=lambda x: x.get("score", 0), reverse=True)[:18]
     context = "\n\n".join(
         [
-            f"[SOURCE {i+1} | Page {h.get('page')}]\n{h.get('text','')}"
+            f"[SOURCE {i + 1} | Page {h.get('page')}]\n{h.get('text', '')}"
             for i, h in enumerate(merged)
         ]
     )
@@ -2263,9 +2178,7 @@ APPROVED GUIDELINE CONTEXT:
         answer = await call_ollama(request.base_model, prompt)
         profile = _parse_json_object(answer) or {"rules": []}
     except Exception as e:
-        raise HTTPException(
-            status_code=503, detail=f"Formatting profile extraction failed: {e}"
-        )
+        raise HTTPException(status_code=503, detail=f"Formatting profile extraction failed: {e}")
     profile["collection"] = collection_name
     profile["model"] = request.base_model
     return {"status": "success", "profile": profile, "retrieved_sources": merged}

@@ -3,6 +3,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from .config import settings
 
+
 def send_submission_email(to_email: str, subject: str, body: str, attachments: list[str]):
     if not settings.smtp_host:
         return False, "SMTP not configured. Email was not sent."

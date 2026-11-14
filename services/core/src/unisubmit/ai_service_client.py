@@ -39,14 +39,10 @@ async def rag_validate(service_url: str, payload: dict):
         except (ValueError, AttributeError):
             detail = "Non-JSON error response; inspect the AI service log"
         logger.error("AI validation HTTP %s: %s", exc.response.status_code, detail)
-        raise RuntimeError(
-            f"AI validation HTTP {exc.response.status_code}: {detail}"
-        ) from exc
+        raise RuntimeError(f"AI validation HTTP {exc.response.status_code}: {detail}") from exc
     except Exception as exc:
         logger.exception("AI validation request failed")
-        raise RuntimeError(
-            f"AI validation request failed: {type(exc).__name__}: {exc}"
-        ) from exc
+        raise RuntimeError(f"AI validation request failed: {type(exc).__name__}: {exc}") from exc
 
 
 async def index_template(service_url: str, fields: dict, pdf_path: str):

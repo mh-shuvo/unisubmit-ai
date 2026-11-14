@@ -9,6 +9,7 @@ DEF-034: a job interrupted mid-run stayed PROCESSING forever.
 DEF-035: a stale per-profile AI service URL overrode the configured one.
 DEF-036: the worker swallowed failures, so a broken job vanished from the logs.
 """
+
 import asyncio
 import inspect
 import io
@@ -194,8 +195,9 @@ class WorkerTests(AppTestCase):
         from sqlalchemy import inspect as sa_inspect
         from sqlalchemy.pool import StaticPool
 
-        empty = create_engine("sqlite://", poolclass=StaticPool,
-                              connect_args={"check_same_thread": False})
+        empty = create_engine(
+            "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+        )
 
         async def start_then_stop():
             task = asyncio.create_task(self.worker.main())
@@ -203,8 +205,10 @@ class WorkerTests(AppTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-        with patch.object(self.worker, "engine", empty), \
-                patch.object(self.worker, "POLL_SECONDS", 0.01):
+        with (
+            patch.object(self.worker, "engine", empty),
+            patch.object(self.worker, "POLL_SECONDS", 0.01),
+        ):
             asyncio.run(start_then_stop())
 
         self.assertEqual(sa_inspect(empty).get_table_names(), [])
@@ -224,8 +228,12 @@ class WorkerTests(AppTestCase):
         long_ago = datetime.utcnow() - self.worker.STALE_AFTER - timedelta(minutes=1)
         with self.Session() as db:
             job_id = add_version(
-                db, self.world.submission_id, self.tmp, "PROCESSING",
-                started_at=long_ago, attempt_count=1,
+                db,
+                self.world.submission_id,
+                self.tmp,
+                "PROCESSING",
+                started_at=long_ago,
+                attempt_count=1,
             )
             requeued = self.worker.requeue_stale_jobs(db)
 
@@ -235,8 +243,12 @@ class WorkerTests(AppTestCase):
         """DEF-034: a job another worker is still running is left alone."""
         with self.Session() as db:
             job_id = add_version(
-                db, self.world.submission_id, self.tmp, "PROCESSING",
-                started_at=datetime.utcnow(), attempt_count=1,
+                db,
+                self.world.submission_id,
+                self.tmp,
+                "PROCESSING",
+                started_at=datetime.utcnow(),
+                attempt_count=1,
             )
             self.worker.requeue_stale_jobs(db)
 
@@ -264,8 +276,10 @@ class WorkerTests(AppTestCase):
             db.add(AIJob(submission_version_id=job.submission_version_id))
             db.flush()
 
-        with patch.object(self.worker, "process_job", new=breaks_the_session), \
-                self.assertLogs("unisubmit.worker", level="ERROR"):
+        with (
+            patch.object(self.worker, "process_job", new=breaks_the_session),
+            self.assertLogs("unisubmit.worker", level="ERROR"),
+        ):
             asyncio.run(self.worker.run_once())
 
         status, attempts, error = self.job(job_id)
@@ -299,8 +313,10 @@ class AIServiceRoutingTests(AppTestCase):
         parse = AsyncMock(return_value={"status": "success", "profile": {}})
         index = AsyncMock(return_value={"status": "success", "collection": "ignored"})
         tv_id = self.world.template_version_id
-        with patch.object(web, "parse_guideline_profile", new=parse), \
-                patch.object(web, "index_template", new=index):
+        with (
+            patch.object(web, "parse_guideline_profile", new=parse),
+            patch.object(web, "index_template", new=index),
+        ):
             self.logged_in_admin().post(f"/admin/template-version/{tv_id}/index")
 
         self.assertEqual(parse.await_args.args[0], settings.ai_service_url)
@@ -333,9 +349,11 @@ class AIClientAuthTests(unittest.TestCase):
             kwargs["transport"] = httpx.MockTransport(handler)
             return real_sync(*args, **kwargs)
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as pdf, \
-                patch.object(client.httpx, "AsyncClient", async_factory), \
-                patch.object(client.httpx, "Client", sync_factory):
+        with (
+            tempfile.NamedTemporaryFile(suffix=".pdf") as pdf,
+            patch.object(client.httpx, "AsyncClient", async_factory),
+            patch.object(client.httpx, "Client", sync_factory),
+        ):
             url = "http://ai.test"
             asyncio.run(client.rag_validate(url, {}))
             asyncio.run(client.index_template(url, {}, pdf.name))

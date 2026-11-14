@@ -55,7 +55,7 @@ Qwen writes rule values as human text, not bare numbers. `float()` raised and
 killed the whole job, so a single odd value lost all 88 rule results.
 
 ```python
-exp = float(expected)        # 'double'  -> ValueError -> job FAILED
+exp = float(expected)  # 'double'  -> ValueError -> job FAILED
 ```
 
 **Example:** guideline says *"The print size should be at least 12 points"* →
@@ -181,7 +181,7 @@ any parenthetical or bracketed qualifier. Generic, no degree or section names
 hardcoded:
 
 ```python
-re.sub(r'\s*[\(\[][^)\]]*[\)\]]\s*', ' ', target)
+re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*", " ", target)
 ```
 
 `_find_section()` tries the literal target, then the stripped one;
@@ -253,9 +253,10 @@ result is reported as `NOT VERIFIED` rather than passing a rule that inspected
 nothing:
 
 ```python
-candidates=_heading_candidates(info,target)
+candidates = _heading_candidates(info, target)
 if not candidates:
-    out.append(_not_verified(..., f'No document heading matched the target "{target}"', ...)); continue
+    out.append(_not_verified(..., f'No document heading matched the target "{target}"', ...))
+    continue
 ```
 
 Effect on this PDF: 6 vacuous PASSes became `NOT VERIFIED`, and 2 rules whose
@@ -465,7 +466,8 @@ Before (the first crash patch) — skipped rule silently became PASS:
 
 ```python
 exp = _parse_num(expected)
-if exp is None: continue                   # -> wrapper reports PASS
+if exp is None:
+    continue  # -> wrapper reports PASS
 ```
 
 After — the rule reports itself as undecided, with the reason:
@@ -473,9 +475,19 @@ After — the rule reports itself as undecided, with the reason:
 ```python
 exp = _parse_num(expected)
 if exp is None:
-    out.append(_not_verified('LINE_SPACING', 'Line spacing', str(expected), source,
-                             f'Could not interpret the required spacing "{expected}"',
-                             severity, evidence, section)); continue
+    out.append(
+        _not_verified(
+            "LINE_SPACING",
+            "Line spacing",
+            str(expected),
+            source,
+            f'Could not interpret the required spacing "{expected}"',
+            severity,
+            evidence,
+            section,
+        )
+    )
+    continue
 ```
 
 C16 catches the related case where the parser produced **no value at all**
@@ -483,10 +495,19 @@ C16 catches the related case where the parser produced **no value at all**
 name:
 
 ```python
-if r.get('value') is None or (isinstance(r.get('value'), str) and not r['value'].strip()):
-    rows.append(_not_verified(f'NO_VALUE_{idx}', name, expected or '(not parsed)', source,
-                              'The guideline parser extracted no required value for this rule',
-                              severity, evidence, section))
+if r.get("value") is None or (isinstance(r.get("value"), str) and not r["value"].strip()):
+    rows.append(
+        _not_verified(
+            f"NO_VALUE_{idx}",
+            name,
+            expected or "(not parsed)",
+            source,
+            "The guideline parser extracted no required value for this rule",
+            severity,
+            evidence,
+            section,
+        )
+    )
     continue
 ```
 
@@ -504,8 +525,9 @@ and both the PDF (`app/reporting.py`) and HTML
 Before — `target` was ignored entirely:
 
 ```python
-val = int(float(expected)); actual = int(info.get('page_count', 0))
-ok = actual >= val if kind == 'min_pages' else actual <= val
+val = int(float(expected))
+actual = int(info.get("page_count", 0))
+ok = actual >= val if kind == "min_pages" else actual <= val
 ```
 
 With `{max_pages, target: "Abstract", value: 1}` this compared `1` against the
@@ -515,12 +537,19 @@ After — scope is chosen from `target`:
 
 ```python
 if _is_generic_target(target):
-    scope = 'Whole document'; actual = int(info.get('page_count', 0))
+    scope = "Whole document"
+    actual = int(info.get("page_count", 0))
 else:
-    name = f'{name} ({target})'; scope = f'Section: {target}'
+    name = f"{name} ({target})"
+    scope = f"Section: {target}"
     span = _section_page_span(info, text, target)
     if span is None:
-        out.append(_not_verified(..., f'Could not locate the section "{target}" to measure its length', ...)); continue
+        out.append(
+            _not_verified(
+                ..., f'Could not locate the section "{target}" to measure its length', ...
+            )
+        )
+        continue
     actual = span[1] - span[0] + 1
 ```
 
@@ -546,11 +575,20 @@ Added before the existing per-page loop:
 
 ```python
 if not _is_generic_target(target):
-    out.append(_not_verified(kind.upper(), f'{side.title()} margin ({target})',
-                             f'at least {exp:g} mm', source,
-                             f'Rule applies to "{target}" only, which the page-level '
-                             f'margin measurement cannot isolate',
-                             severity, evidence, section)); continue
+    out.append(
+        _not_verified(
+            kind.upper(),
+            f"{side.title()} margin ({target})",
+            f"at least {exp:g} mm",
+            source,
+            f'Rule applies to "{target}" only, which the page-level '
+            f"margin measurement cannot isolate",
+            severity,
+            evidence,
+            section,
+        )
+    )
+    continue
 ```
 
 Generic margin rules (the four real ones in this profile) are untouched and
@@ -568,7 +606,7 @@ Before — `re.escape()` put the qualifier into the heading pattern, making the
 target unmatchable against any document:
 
 ```python
-pat = rf'(?is)(?:^|\n)\s*(?:\d+(?:\.\d+)*\s+)?{re.escape(target)}\s*\n(.*?)...'
+pat = rf"(?is)(?:^|\n)\s*(?:\d+(?:\.\d+)*\s+)?{re.escape(target)}\s*\n(.*?)..."
 m = re.search(pat, text)
 return m.group(1) if m else None
 ```
@@ -578,10 +616,12 @@ After — try the literal target, then the de-qualified one (C6):
 ```python
 candidates = [str(target).strip()]
 stripped = _strip_qualifier(target)
-if stripped and stripped.lower() != candidates[0].lower(): candidates.append(stripped)
+if stripped and stripped.lower() != candidates[0].lower():
+    candidates.append(stripped)
 for cand in candidates:
     ...
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
 return None
 ```
 
@@ -589,8 +629,8 @@ return None
 names:
 
 ```python
-t = re.sub(r'\s*[\(\[][^)\]]*[\)\]]\s*', ' ', str(target or ''))
-return re.sub(r'\s+', ' ', t).strip(' -:–—')
+t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*", " ", str(target or ""))
+return re.sub(r"\s+", " ", t).strip(" -:–—")
 ```
 
 C8 applies the same strip inside `_normalize_heading()`, so `required_section`
@@ -620,9 +660,9 @@ After:
 
 ```python
 if not target:
-    return ""                              # full doc is already in the prompt once
+    return ""  # full doc is already in the prompt once
 ...
-return "\n".join(out).strip()[:SECTION_EVIDENCE_CHARS]   # 3000
+return "\n".join(out).strip()[:SECTION_EVIDENCE_CHARS]  # 3000
 ```
 
 C19 drops the key entirely when empty, and the prompt gained the matching
@@ -646,8 +686,9 @@ raised `Ollama response was incomplete`.
 C22 is the structural fix — one call per batch of rules:
 
 ```python
-batches = [explicit[i:i + SEMANTIC_BATCH_SIZE]
-           for i in range(0, len(explicit), SEMANTIC_BATCH_SIZE)] or [[]]
+batches = [
+    explicit[i : i + SEMANTIC_BATCH_SIZE] for i in range(0, len(explicit), SEMANTIC_BATCH_SIZE)
+] or [[]]
 for batch_no, batch in enumerate(batches, start=1):
     prompt = f"""...Return exactly {len(batch)} objects...
     PARSED SEMANTIC REQUIREMENTS...:\n{json.dumps(batch, ensure_ascii=False)}..."""
@@ -663,10 +704,10 @@ which roughly halves output tokens.
 New knobs, all env-overridable:
 
 ```python
-SEMANTIC_BATCH_SIZE     = int(os.getenv("SEMANTIC_BATCH_SIZE", "12"))
+SEMANTIC_BATCH_SIZE = int(os.getenv("SEMANTIC_BATCH_SIZE", "12"))
 SEMANTIC_CONTEXT_CHUNKS = int(os.getenv("SEMANTIC_CONTEXT_CHUNKS", "12"))
-SEMANTIC_STUDENT_CHARS  = int(os.getenv("SEMANTIC_STUDENT_CHARS", "14000"))
-SECTION_EVIDENCE_CHARS  = int(os.getenv("SEMANTIC_SECTION_CHARS", "3000"))
+SEMANTIC_STUDENT_CHARS = int(os.getenv("SEMANTIC_STUDENT_CHARS", "14000"))
+SECTION_EVIDENCE_CHARS = int(os.getenv("SEMANTIC_SECTION_CHARS", "3000"))
 ```
 
 **`num_ctx` / `num_predict` were left at their original 16384 / 4096.** Raising
@@ -685,8 +726,11 @@ C26 — `call_ollama()` now warns before Ollama truncates:
 budget = num_ctx - num_predict
 estimated_tokens = int(len(prompt) / CHARS_PER_TOKEN)
 if estimated_tokens > budget:
-    logger.warning("Prompt likely exceeds context budget model=%s prompt_chars=%s "
-                   "estimated_tokens=%s num_ctx=%s usable_budget=%s; Ollama will truncate", ...)
+    logger.warning(
+        "Prompt likely exceeds context budget model=%s prompt_chars=%s "
+        "estimated_tokens=%s num_ctx=%s usable_budget=%s; Ollama will truncate",
+        ...,
+    )
 ```
 
 C24 pins the merge key, since the server joins model output to rules on
@@ -748,7 +792,7 @@ debugging time:
 raise HTTPException(
     status_code=503,
     detail=f"Local LLM unavailable on semantic batch {batch_no}/{len(batches)}: "
-           f"{type(e).__name__}: {e}".rstrip(': '),
+    f"{type(e).__name__}: {e}".rstrip(": "),
 ) from e
 ```
 

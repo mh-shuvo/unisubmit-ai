@@ -41,12 +41,12 @@ needed a measured ratio between **1.72 and 2.28**.
 placed in the **same block**:
 
 ```python
-for block in d.get('blocks', []):
-    block_lines = []                                  # reset for every block
+for block in d.get("blocks", []):
+    block_lines = []  # reset for every block
     ...
-    for a, b in zip(block_lines, block_lines[1:]):    # pairs only within one block
-        baseline_gap = b['bbox'][1] - a['bbox'][1]
-        fs = (a['font_size'] + b['font_size']) / 2
+    for a, b in zip(block_lines, block_lines[1:]):  # pairs only within one block
+        baseline_gap = b["bbox"][1] - a["bbox"][1]
+        fs = (a["font_size"] + b["font_size"]) / 2
         if 0.8 * fs <= baseline_gap <= 3.0 * fs:
             line_spacings.append(baseline_gap / fs)
 ```
@@ -79,9 +79,9 @@ overlap test replaces the block boundary as the "same column of text" signal. Th
 existing `0.8 - 3.0` sanity window is unchanged.
 
 ```python
-ordered = sorted(body_lines, key=lambda x: x['bbox'][1])
+ordered = sorted(body_lines, key=lambda x: x["bbox"][1])
 for a, b in zip(ordered, ordered[1:]):
-    if min(a['bbox'][2], b['bbox'][2]) <= max(a['bbox'][0], b['bbox'][0]):
+    if min(a["bbox"][2], b["bbox"][2]) <= max(a["bbox"][0], b["bbox"][0]):
         continue
     ...
 ```
@@ -108,8 +108,8 @@ The guideline sets a heading hierarchy: chapter titles 14 pt, secondary headings
 12 pt. The parser stores two rules with two different targets, which is correct:
 
 ```python
-{'type': 'heading_font_size_pt', 'target': 'Chapter Heading', 'value': 14}   # rule 25
-{'type': 'heading_font_size_pt', 'target': 'Section Heading', 'value': 12}   # rule 29
+{"type": "heading_font_size_pt", "target": "Chapter Heading", "value": 14}  # rule 25
+{"type": "heading_font_size_pt", "target": "Section Heading", "value": 12}  # rule 29
 ```
 
 ### What went wrong
@@ -119,9 +119,9 @@ recognised phrases, the branch that ran never consulted it again and fell back t
 a single shared pattern:
 
 ```python
-if low in {'chapter heading', 'section heading', 'heading'}:
-    if re.match(r'^(chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)', txt, re.I):
-        found.append((pg, ln))          # 'low' is never used again
+if low in {"chapter heading", "section heading", "heading"}:
+    if re.match(r"^(chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)", txt, re.I):
+        found.append((pg, ln))  # 'low' is never used again
 ```
 
 Both targets therefore returned the *identical* list of lines, and each rule
@@ -158,10 +158,10 @@ skipped for level matches:
 
 ```python
 _HEADING_LEVEL_PATTERNS = {
-    'chapter heading': re.compile(r'^chapter\s+\w+', re.I),
-    'section heading': re.compile(r'^\d+\.\d+(?!\.\d)\s+\S+'),
-    'third level heading': re.compile(r'^\d+\.\d+\.\d+\s+\S+'),
-    'heading': re.compile(r'^(?:chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)', re.I),
+    "chapter heading": re.compile(r"^chapter\s+\w+", re.I),
+    "section heading": re.compile(r"^\d+\.\d+(?!\.\d)\s+\S+"),
+    "third level heading": re.compile(r"^\d+\.\d+\.\d+\s+\S+"),
+    "heading": re.compile(r"^(?:chapter\s+\w+|\d+(?:\.\d+)*\s+\S+)", re.I),
 }
 ```
 

@@ -18,6 +18,7 @@ And the three defects that made correctly formatted theses fail:
   demanded two different sizes of it, which no document can satisfy
 - font-name normalisation erased the weight before the bold check read it
 """
+
 import json
 import shutil
 import tempfile
@@ -37,99 +38,118 @@ from unisubmit.format_validation import (  # noqa: E402
     _span_is_bold,
     _strip_qualifier,
     validate_all_profile_rules,
-    _to_title_case
+    _to_title_case,
 )
 from unisubmit.pdf_utils import inspect_pdf  # noqa: E402
 
 
 def _page(page, **kw):
     base = {
-        'page': page, 'width_pt': 595.0, 'height_pt': 842.0,
-        'width_mm': 210.0, 'height_mm': 297.0,
-        'dominant_font': 'Times New Roman', 'dominant_font_size': 12.0,
-        'estimated_line_spacing': 1.5,
-        'margins': {'left_mm': 38.1, 'right_mm': 25.4, 'top_mm': 25.4,
-                    'bottom_mm': 25.4, 'evidence_lines': 20},
-        'spans': [], 'lines': [],
+        "page": page,
+        "width_pt": 595.0,
+        "height_pt": 842.0,
+        "width_mm": 210.0,
+        "height_mm": 297.0,
+        "dominant_font": "Times New Roman",
+        "dominant_font_size": 12.0,
+        "estimated_line_spacing": 1.5,
+        "margins": {
+            "left_mm": 38.1,
+            "right_mm": 25.4,
+            "top_mm": 25.4,
+            "bottom_mm": 25.4,
+            "evidence_lines": 20,
+        },
+        "spans": [],
+        "lines": [],
     }
     base.update(kw)
     return base
 
 
-def _info(pages, text=''):
-    return {'page_count': len(pages), 'pages': pages, 'text': text,
-            'searchable': True, 'page_sizes': [(595.0, 842.0)] * len(pages)}
+def _info(pages, text=""):
+    return {
+        "page_count": len(pages),
+        "pages": pages,
+        "text": text,
+        "searchable": True,
+        "page_sizes": [(595.0, 842.0)] * len(pages),
+    }
 
 
 def _run(rule, info):
-    rows = validate_all_profile_rules({'deterministic_rules': [rule]}, info)
+    rows = validate_all_profile_rules({"deterministic_rules": [rule]}, info)
     assert len(rows) == 1, rows
     return rows[0]
 
 
 def _rule(**kw):
-    base = {'type': '', 'target': '', 'value': None, 'mandatory': True,
-            'final_severity': 'Mandatory', 'enabled': True, 'source_page': 4}
+    base = {
+        "type": "",
+        "target": "",
+        "value": None,
+        "mandatory": True,
+        "final_severity": "Mandatory",
+        "enabled": True,
+        "source_page": 4,
+    }
     base.update(kw)
     return base
 
 
 class ParseRuleValues(unittest.TestCase):
     def test_operator_prefix_is_not_a_crash(self):
-        self.assertEqual(_parse_num('>=12'), 12.0)
+        self.assertEqual(_parse_num(">=12"), 12.0)
 
     def test_word_spacing_value(self):
-        self.assertEqual(_parse_num('double'), 2.0)
+        self.assertEqual(_parse_num("double"), 2.0)
 
     def test_spacing_noun_suffix_is_stripped(self):
-        self.assertEqual(_parse_num('single space'), 1.0)
+        self.assertEqual(_parse_num("single space"), 1.0)
 
     def test_word_operator_is_recognised(self):
-        self.assertEqual(_parse_num_op('no more than 150 words'), (150.0, '<='))
+        self.assertEqual(_parse_num_op("no more than 150 words"), (150.0, "<="))
 
     def test_unparseable_value_returns_none(self):
-        self.assertIsNone(_parse_num('A4'))
+        self.assertIsNone(_parse_num("A4"))
 
     def test_at_least_allows_larger_value(self):
-        self.assertTrue(_num_ok(14.0, 12.0, '>=', 0.6))
+        self.assertTrue(_num_ok(14.0, 12.0, ">=", 0.6))
 
     def test_at_least_rejects_smaller_value(self):
-        self.assertFalse(_num_ok(8.0, 12.0, '>=', 0.6))
+        self.assertFalse(_num_ok(8.0, 12.0, ">=", 0.6))
 
     def test_exact_match_rejects_larger_value(self):
-        self.assertFalse(_num_ok(14.0, 12.0, '==', 0.6))
+        self.assertFalse(_num_ok(14.0, 12.0, "==", 0.6))
 
 
 class TargetHandling(unittest.TestCase):
     def test_parenthetical_qualifier_is_stripped(self):
-        self.assertEqual(_strip_qualifier('Abstract (M.S. thesis)'), 'Abstract')
+        self.assertEqual(_strip_qualifier("Abstract (M.S. thesis)"), "Abstract")
 
     def test_literal_none_target_is_document_wide(self):
-        self.assertTrue(_is_generic_target('None'))
+        self.assertTrue(_is_generic_target("None"))
 
     def test_named_section_is_not_document_wide(self):
-        self.assertFalse(_is_generic_target('Abstract'))
+        self.assertFalse(_is_generic_target("Abstract"))
 
     def test_qualified_target_still_finds_section(self):
-        text = 'ABSTRACT\nSome abstract body text that is long enough.\nINTRODUCTION\nBody.\n'
-        self.assertIsNotNone(_find_section(text, 'Abstract (M.S. thesis)'))
+        text = "ABSTRACT\nSome abstract body text that is long enough.\nINTRODUCTION\nBody.\n"
+        self.assertIsNotNone(_find_section(text, "Abstract (M.S. thesis)"))
 
 
 class NoSilentPass(unittest.TestCase):
     def test_unparseable_value_is_not_verified(self):
-        row = _run(_rule(type='line_spacing', value='as per department'),
-                   _info([_page(1)]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(_rule(type="line_spacing", value="as per department"), _info([_page(1)]))
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_missing_parsed_value_is_not_verified(self):
-        row = _run(_rule(type='heading_case', target='', value=None),
-                   _info([_page(1)]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(_rule(type="heading_case", target="", value=None), _info([_page(1)]))
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_untargeted_heading_rule_has_a_readable_name(self):
-        row = _run(_rule(type='heading_case', target='', value=None),
-                   _info([_page(1)]))
-        self.assertFalse(row['name'].startswith(':'))
+        row = _run(_rule(type="heading_case", target="", value=None), _info([_page(1)]))
+        self.assertFalse(row["name"].startswith(":"))
 
 
 class SectionScoping(unittest.TestCase):
@@ -137,35 +157,40 @@ class SectionScoping(unittest.TestCase):
 
     def test_section_page_limit_is_not_measured_on_whole_document(self):
         info = _info([_page(i) for i in range(1, 31)])
-        row = _run(_rule(type='max_pages', target='Abstract', value=1), info)
-        self.assertNotEqual(row['status'], 'FAIL')
+        row = _run(_rule(type="max_pages", target="Abstract", value=1), info)
+        self.assertNotEqual(row["status"], "FAIL")
 
     def test_document_page_limit_still_fails(self):
         info = _info([_page(i) for i in range(1, 31)])
-        row = _run(_rule(type='max_pages', target='', value=10), info)
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(_rule(type="max_pages", target="", value=10), info)
+        self.assertEqual(row["status"], "FAIL")
 
     def test_section_scoped_spacing_is_not_verified_from_page_medians(self):
-        row = _run(_rule(type='line_spacing', target='Abstract', value='single space'),
-                   _info([_page(1, estimated_line_spacing=1.16)]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(type="line_spacing", target="Abstract", value="single space"),
+            _info([_page(1, estimated_line_spacing=1.16)]),
+        )
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_named_area_margin_is_not_a_document_failure(self):
-        row = _run(_rule(type='margin_top_mm', target='Chapter Heading area', value=101.6),
-                   _info([_page(1)]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(type="margin_top_mm", target="Chapter Heading area", value=101.6),
+            _info([_page(1)]),
+        )
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_document_margin_still_fails_on_intrusion(self):
         intruding = _page(1)
-        intruding['margins'] = dict(intruding['margins'], left_mm=10.0)
-        row = _run(_rule(type='margin_left_mm', target='', value=38.1),
-                   _info([intruding]))
-        self.assertEqual(row['status'], 'FAIL')
+        intruding["margins"] = dict(intruding["margins"], left_mm=10.0)
+        row = _run(_rule(type="margin_left_mm", target="", value=38.1), _info([intruding]))
+        self.assertEqual(row["status"], "FAIL")
 
     def test_missing_section_word_count_is_not_a_failure(self):
-        row = _run(_rule(type='section_max_words', target='Abstract (M.S. thesis)', value=150),
-                   _info([_page(1)], text='INTRODUCTION\nNo abstract heading here.\n'))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(type="section_max_words", target="Abstract (M.S. thesis)", value=150),
+            _info([_page(1)], text="INTRODUCTION\nNo abstract heading here.\n"),
+        )
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
 
 class HeadingTargetMatching(unittest.TestCase):
@@ -174,27 +199,42 @@ class HeadingTargetMatching(unittest.TestCase):
     @staticmethod
     def _info_with_heading(text):
         pg = _page(1)
-        pg['lines'] = [{'text': text, 'bbox': (100.0, 50.0, 300.0, 64.0), 'font_size': 14.0}]
-        return _info([pg], text=text + '\n')
+        pg["lines"] = [{"text": text, "bbox": (100.0, 50.0, 300.0, 64.0), "font_size": 14.0}]
+        return _info([pg], text=text + "\n")
 
     def test_unmatchable_target_is_not_verified(self):
-        row = _run(_rule(type='heading_case', target='Cover page Middle text (Name of student)',
-                         value='ALL CAPS', final_severity='Warning'),
-                   self._info_with_heading('CHAPTER 1'))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(
+                type="heading_case",
+                target="Cover page Middle text (Name of student)",
+                value="ALL CAPS",
+                final_severity="Warning",
+            ),
+            self._info_with_heading("CHAPTER 1"),
+        )
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_qualified_generic_target_still_evaluates(self):
         # 'Chapter Heading (implied by context)' must resolve to chapter headings.
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading (implied by context)',
-                         value='centered', final_severity='Warning'),
-                   self._info_with_heading('CHAPTER 1'))
-        self.assertNotEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(
+                type="heading_alignment",
+                target="Chapter Heading (implied by context)",
+                value="centered",
+                final_severity="Warning",
+            ),
+            self._info_with_heading("CHAPTER 1"),
+        )
+        self.assertNotEqual(row["status"], "NOT VERIFIED")
 
     def test_matching_target_still_passes_when_compliant(self):
-        row = _run(_rule(type='heading_case', target='ABSTRACT', value='ALL CAPS',
-                         final_severity='Warning'),
-                   self._info_with_heading('ABSTRACT'))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(
+                type="heading_case", target="ABSTRACT", value="ALL CAPS", final_severity="Warning"
+            ),
+            self._info_with_heading("ABSTRACT"),
+        )
+        self.assertEqual(row["status"], "PASS")
 
 
 class HeadingAlignment(unittest.TestCase):
@@ -210,45 +250,57 @@ class HeadingAlignment(unittest.TestCase):
     @staticmethod
     def _info_with_chapter_heading(bbox):
         pg = _page(1)
-        pg['lines'] = [{'text': 'CHAPTER 1', 'bbox': bbox, 'font_size': 14.0}]
-        return _info([pg], text='CHAPTER 1\n')
+        pg["lines"] = [{"text": "CHAPTER 1", "bbox": bbox, "font_size": 14.0}]
+        return _info([pg], text="CHAPTER 1\n")
 
     def test_flush_left_heading_passes_flush_left_rule(self):
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
-                   self._info_with_chapter_heading((100.0, 50.0, 300.0, 64.0)))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="flush left"),
+            self._info_with_chapter_heading((100.0, 50.0, 300.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_centered_heading_fails_flush_left_rule(self):
         # Previously 'flush left' was not recognised at all, so a centered
         # heading silently passed a left-alignment requirement.
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
-                   self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="flush left"),
+            self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
     def test_right_aligned_heading_passes_right_rule(self):
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='right-aligned'),
-                   self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="right-aligned"),
+            self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_right_aligned_heading_fails_flush_left_rule(self):
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
-                   self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="flush left"),
+            self._info_with_chapter_heading((420.0, 50.0, 523.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
     def test_centered_heading_still_passes_centered_rule(self):
         # Unchanged behaviour: the original center detection and tolerance.
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='centered'),
-                   self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="centered"),
+            self._info_with_chapter_heading((250.0, 50.0, 345.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_long_flush_left_heading_is_not_misread_as_centered(self):
         # Left edge sits exactly on the 108.0pt left margin, but the line is
         # long enough that its midpoint drifts into the page's center band.
         # Comparing raw distance to each page edge (or to the page center)
         # would misclassify this as centered; the margin anchor must win.
-        row = _run(_rule(type='heading_alignment', target='Chapter Heading', value='flush left'),
-                   self._info_with_chapter_heading((108.0, 50.0, 508.0, 64.0)))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="heading_alignment", target="Chapter Heading", value="flush left"),
+            self._info_with_chapter_heading((108.0, 50.0, 508.0, 64.0)),
+        )
+        self.assertEqual(row["status"], "PASS")
 
 
 class BodyAlignment(unittest.TestCase):
@@ -256,7 +308,7 @@ class BodyAlignment(unittest.TestCase):
 
     @staticmethod
     def _body_line(y, right_x, length=60):
-        return {'text': 'x' * length, 'bbox': (72.0, y, right_x, y + 14.0), 'font_size': 12.0}
+        return {"text": "x" * length, "bbox": (72.0, y, right_x, y + 14.0), "font_size": 12.0}
 
     def _justified_lines(self):
         # Every line's right edge sits tight around 520pt; only the last
@@ -273,75 +325,107 @@ class BodyAlignment(unittest.TestCase):
     def _right_aligned_lines(self):
         # Right edge tight around 520pt on every line including the last
         # (that's what right alignment means); left edge ragged throughout.
-        lines = [{'text': 'x' * 60, 'bbox': (460.0 - (i * 15) % 100, 100 + i * 18,
-                  520.0 + (0.5 if i % 2 else -0.5), 114 + i * 18), 'font_size': 12.0}
-                 for i in range(8)]
-        lines.append({'text': 'x' * 15, 'bbox': (480.0, 100 + 8 * 18, 520.0, 114 + 8 * 18), 'font_size': 12.0})
+        lines = [
+            {
+                "text": "x" * 60,
+                "bbox": (
+                    460.0 - (i * 15) % 100,
+                    100 + i * 18,
+                    520.0 + (0.5 if i % 2 else -0.5),
+                    114 + i * 18,
+                ),
+                "font_size": 12.0,
+            }
+            for i in range(8)
+        ]
+        lines.append(
+            {
+                "text": "x" * 15,
+                "bbox": (480.0, 100 + 8 * 18, 520.0, 114 + 8 * 18),
+                "font_size": 12.0,
+            }
+        )
         return lines
 
     def test_justified_text_passes_justified_rule(self):
-        row = _run(_rule(type='body_alignment', value='Justified'),
-                   _info([_page(1, lines=self._justified_lines())]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="body_alignment", value="Justified"),
+            _info([_page(1, lines=self._justified_lines())]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_ragged_right_text_fails_justified_rule(self):
-        row = _run(_rule(type='body_alignment', value='Justified'),
-                   _info([_page(1, lines=self._ragged_lines())]))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="body_alignment", value="Justified"),
+            _info([_page(1, lines=self._ragged_lines())]),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
     def test_ragged_right_text_passes_left_rule(self):
-        row = _run(_rule(type='body_alignment', value='Left'),
-                   _info([_page(1, lines=self._ragged_lines())]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="body_alignment", value="Left"),
+            _info([_page(1, lines=self._ragged_lines())]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_no_body_text_is_not_verified(self):
-        row = _run(_rule(type='body_alignment', value='Justified'),
-                   _info([_page(1)]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(_rule(type="body_alignment", value="Justified"), _info([_page(1)]))
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_unsupported_wording_is_not_verified(self):
-        row = _run(_rule(type='body_alignment', value='Diagonal'),
-                   _info([_page(1, lines=self._justified_lines())]))
-        self.assertEqual(row['status'], 'NOT VERIFIED')
+        row = _run(
+            _rule(type="body_alignment", value="Diagonal"),
+            _info([_page(1, lines=self._justified_lines())]),
+        )
+        self.assertEqual(row["status"], "NOT VERIFIED")
 
     def test_right_aligned_text_passes_right_rule(self):
-        row = _run(_rule(type='body_alignment', value='Right-aligned'),
-                   _info([_page(1, lines=self._right_aligned_lines())]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="body_alignment", value="Right-aligned"),
+            _info([_page(1, lines=self._right_aligned_lines())]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_right_aligned_text_fails_justified_rule(self):
         # Checking only the right edge cannot tell justified from
         # right-aligned: both have flush right edges. The left edge must
         # also be checked, or this reports PASS for text that isn't justified.
-        row = _run(_rule(type='body_alignment', value='Justified'),
-                   _info([_page(1, lines=self._right_aligned_lines())]))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="body_alignment", value="Justified"),
+            _info([_page(1, lines=self._right_aligned_lines())]),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
     def test_embedded_acronym_does_not_exclude_a_body_line(self):
         # The all-caps exclusion is whole-line ('is this heading-like text'),
         # not per-word, so an ordinary sentence containing an acronym like
         # AI must still count as body text.
-        line = ('Artificial Intelligence (AI) has transformed how researchers '
-                'analyze large datasets and automate repetitive tasks.')
+        line = (
+            "Artificial Intelligence (AI) has transformed how researchers "
+            "analyze large datasets and automate repetitive tasks."
+        )
         self.assertTrue(_is_body_text_line(line, 12.0))
 
     def test_fully_capitalised_line_is_excluded(self):
         # Unlike an embedded acronym, a line that is uppercase throughout
         # reads as a heading, not a body paragraph, and must stay excluded.
-        line = 'THE IMPACT OF AI ON MODERN RESEARCH METHODOLOGY AND PRACTICE'
+        line = "THE IMPACT OF AI ON MODERN RESEARCH METHODOLOGY AND PRACTICE"
         self.assertFalse(_is_body_text_line(line, 12.0))
 
 
 class OperatorSemantics(unittest.TestCase):
     def test_at_least_12pt_accepts_14pt_body(self):
-        row = _run(_rule(type='body_font_size_pt', value='>=12'),
-                   _info([_page(1, dominant_font_size=14.0)]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="body_font_size_pt", value=">=12"),
+            _info([_page(1, dominant_font_size=14.0)]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_at_least_12pt_rejects_8pt_body(self):
-        row = _run(_rule(type='body_font_size_pt', value='>=12'),
-                   _info([_page(1, dominant_font_size=8.0)]))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="body_font_size_pt", value=">=12"), _info([_page(1, dominant_font_size=8.0)])
+        )
+        self.assertEqual(row["status"], "FAIL")
 
 
 class HeadingLevelSeparation(unittest.TestCase):
@@ -355,55 +439,66 @@ class HeadingLevelSeparation(unittest.TestCase):
     @staticmethod
     def _doc():
         pg = _page(1)
-        pg['lines'] = [
-            {'text': 'CHAPTER 1: INTRODUCTION',
-             'bbox': (200.0, 70.0, 395.0, 88.0), 'font_size': 14.0},
-            {'text': '1.1 Background',
-             'bbox': (99.0, 130.0, 220.0, 144.0), 'font_size': 12.0},
-            {'text': '1.1.1 Reporting practice',
-             'bbox': (99.0, 190.0, 260.0, 204.0), 'font_size': 12.0},
+        pg["lines"] = [
+            {
+                "text": "CHAPTER 1: INTRODUCTION",
+                "bbox": (200.0, 70.0, 395.0, 88.0),
+                "font_size": 14.0,
+            },
+            {"text": "1.1 Background", "bbox": (99.0, 130.0, 220.0, 144.0), "font_size": 12.0},
+            {
+                "text": "1.1.1 Reporting practice",
+                "bbox": (99.0, 190.0, 260.0, 204.0),
+                "font_size": 12.0,
+            },
         ]
         return _info([pg])
 
     def test_chapter_target_matches_only_the_chapter_line(self):
-        found = _heading_candidates(self._doc(), 'Chapter Heading')
-        self.assertEqual([ln['text'] for _, ln in found], ['CHAPTER 1: INTRODUCTION'])
+        found = _heading_candidates(self._doc(), "Chapter Heading")
+        self.assertEqual([ln["text"] for _, ln in found], ["CHAPTER 1: INTRODUCTION"])
 
     def test_section_target_matches_only_the_second_level_line(self):
-        found = _heading_candidates(self._doc(), 'Section Heading')
-        self.assertEqual([ln['text'] for _, ln in found], ['1.1 Background'])
+        found = _heading_candidates(self._doc(), "Section Heading")
+        self.assertEqual([ln["text"] for _, ln in found], ["1.1 Background"])
 
     def test_third_level_target_matches_only_the_third_level_line(self):
-        found = _heading_candidates(self._doc(), 'Third Level Heading')
-        self.assertEqual([ln['text'] for _, ln in found], ['1.1.1 Reporting practice'])
+        found = _heading_candidates(self._doc(), "Third Level Heading")
+        self.assertEqual([ln["text"] for _, ln in found], ["1.1.1 Reporting practice"])
 
     def test_both_size_rules_pass_on_one_compliant_document(self):
-        rows = validate_all_profile_rules({'deterministic_rules': [
-            _rule(type='heading_font_size_pt', target='Chapter Heading', value=14),
-            _rule(type='heading_font_size_pt', target='Section Heading', value=12),
-        ]}, self._doc())
-        self.assertEqual([r['status'] for r in rows], ['PASS', 'PASS'])
+        rows = validate_all_profile_rules(
+            {
+                "deterministic_rules": [
+                    _rule(type="heading_font_size_pt", target="Chapter Heading", value=14),
+                    _rule(type="heading_font_size_pt", target="Section Heading", value=12),
+                ]
+            },
+            self._doc(),
+        )
+        self.assertEqual([r["status"] for r in rows], ["PASS", "PASS"])
 
     def test_wrong_chapter_size_still_fails(self):
         info = self._doc()
-        info['pages'][0]['lines'][0]['font_size'] = 12.0
-        row = _run(_rule(type='heading_font_size_pt', target='Chapter Heading', value=14),
-                   info)
-        self.assertEqual(row['status'], 'FAIL')
+        info["pages"][0]["lines"][0]["font_size"] = 12.0
+        row = _run(_rule(type="heading_font_size_pt", target="Chapter Heading", value=14), info)
+        self.assertEqual(row["status"], "FAIL")
 
     def test_contents_entries_are_not_headings(self):
         toc = _page(1)
-        toc['lines'] = [
-            {'text': 'TABLE OF CONTENTS',
-             'bbox': (200.0, 70.0, 395.0, 88.0), 'font_size': 14.0},
-            {'text': 'CHAPTER 1: INTRODUCTION 1',
-             'bbox': (99.0, 130.0, 400.0, 144.0), 'font_size': 12.0},
+        toc["lines"] = [
+            {"text": "TABLE OF CONTENTS", "bbox": (200.0, 70.0, 395.0, 88.0), "font_size": 14.0},
+            {
+                "text": "CHAPTER 1: INTRODUCTION 1",
+                "bbox": (99.0, 130.0, 400.0, 144.0),
+                "font_size": 12.0,
+            },
         ]
-        self.assertEqual(_heading_candidates(_info([toc]), 'Chapter Heading'), [])
+        self.assertEqual(_heading_candidates(_info([toc]), "Chapter Heading"), [])
 
     def test_qualified_chapter_target_still_resolves(self):
-        found = _heading_candidates(self._doc(), 'Chapter Heading (implied by context)')
-        self.assertEqual([ln['text'] for _, ln in found], ['CHAPTER 1: INTRODUCTION'])
+        found = _heading_candidates(self._doc(), "Chapter Heading (implied by context)")
+        self.assertEqual([ln["text"] for _, ln in found], ["CHAPTER 1: INTRODUCTION"])
 
 
 class FontWeightDetection(unittest.TestCase):
@@ -417,32 +512,39 @@ class FontWeightDetection(unittest.TestCase):
     def _heading(**span):
         pg = _page(1)
         bbox = (200.0, 70.0, 395.0, 88.0)
-        pg['lines'] = [{'text': 'CHAPTER 1: INTRODUCTION', 'bbox': bbox,
-                        'font_size': 14.0}]
-        base = {'text': 'CHAPTER 1: INTRODUCTION', 'font': 'Times New Roman',
-                'size': 14.0, 'bbox': bbox}
+        pg["lines"] = [{"text": "CHAPTER 1: INTRODUCTION", "bbox": bbox, "font_size": 14.0}]
+        base = {
+            "text": "CHAPTER 1: INTRODUCTION",
+            "font": "Times New Roman",
+            "size": 14.0,
+            "bbox": bbox,
+        }
         base.update(span)
-        pg['spans'] = [base]
+        pg["spans"] = [base]
         return _info([pg])
 
     def test_recorded_flag_is_trusted_over_the_normalised_name(self):
-        self.assertTrue(_span_is_bold({'font': 'Times New Roman', 'bold': True}))
+        self.assertTrue(_span_is_bold({"font": "Times New Roman", "bold": True}))
 
     def test_font_name_is_the_fallback_when_no_flag_was_recorded(self):
-        self.assertTrue(_span_is_bold({'font': 'TimesNewRomanPS-BoldMT'}))
+        self.assertTrue(_span_is_bold({"font": "TimesNewRomanPS-BoldMT"}))
 
     def test_regular_span_is_not_bold(self):
-        self.assertFalse(_span_is_bold({'font': 'Times New Roman', 'bold': False}))
+        self.assertFalse(_span_is_bold({"font": "Times New Roman", "bold": False}))
 
     def test_bold_heading_passes(self):
-        row = _run(_rule(type='heading_bold_required', target='Chapter Heading',
-                         value=True), self._heading(bold=True))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="heading_bold_required", target="Chapter Heading", value=True),
+            self._heading(bold=True),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_regular_heading_still_fails(self):
-        row = _run(_rule(type='heading_bold_required', target='Chapter Heading',
-                         value=True), self._heading(bold=False))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="heading_bold_required", target="Chapter Heading", value=True),
+            self._heading(bold=False),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
 
 class LineSpacingReporting(unittest.TestCase):
@@ -454,26 +556,32 @@ class LineSpacingReporting(unittest.TestCase):
     """
 
     def test_double_spacing_passes(self):
-        row = _run(_rule(type='line_spacing', value='double'),
-                   _info([_page(1, estimated_line_spacing=2.0)]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="line_spacing", value="double"),
+            _info([_page(1, estimated_line_spacing=2.0)]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_unmeasurable_page_does_not_warn_when_prose_pages_comply(self):
-        row = _run(_rule(type='line_spacing', value='double'),
-                   _info([_page(1, estimated_line_spacing=None),
-                          _page(2, estimated_line_spacing=2.0)]))
-        self.assertEqual(row['status'], 'PASS')
+        row = _run(
+            _rule(type="line_spacing", value="double"),
+            _info([_page(1, estimated_line_spacing=None), _page(2, estimated_line_spacing=2.0)]),
+        )
+        self.assertEqual(row["status"], "PASS")
 
     def test_wrong_spacing_still_fails(self):
-        row = _run(_rule(type='line_spacing', value='double'),
-                   _info([_page(1, estimated_line_spacing=None),
-                          _page(2, estimated_line_spacing=1.15)]))
-        self.assertEqual(row['status'], 'FAIL')
+        row = _run(
+            _rule(type="line_spacing", value="double"),
+            _info([_page(1, estimated_line_spacing=None), _page(2, estimated_line_spacing=1.15)]),
+        )
+        self.assertEqual(row["status"], "FAIL")
 
     def test_document_with_nothing_measurable_is_still_flagged(self):
-        row = _run(_rule(type='line_spacing', value='double'),
-                   _info([_page(1, estimated_line_spacing=None)]))
-        self.assertEqual(row['status'], 'WARNING')
+        row = _run(
+            _rule(type="line_spacing", value="double"),
+            _info([_page(1, estimated_line_spacing=None)]),
+        )
+        self.assertEqual(row["status"], "WARNING")
 
 
 class PdfMeasurement(unittest.TestCase):
@@ -483,7 +591,7 @@ class PdfMeasurement(unittest.TestCase):
     pairing lines only inside a block made every double-spaced page unmeasurable.
     """
 
-    PROSE = 'hospital information systems accumulate continuous measurements daily'
+    PROSE = "hospital information systems accumulate continuous measurements daily"
 
     @classmethod
     def setUpClass(cls):
@@ -497,102 +605,164 @@ class PdfMeasurement(unittest.TestCase):
         doc = fitz.open()
         page = doc.new_page(width=595, height=842)
         for i in range(4):
-            page.insert_text((99.2, 120 + pitch * i), self.PROSE,
-                             fontname='tiro', fontsize=12)
+            page.insert_text((99.2, 120 + pitch * i), self.PROSE, fontname="tiro", fontsize=12)
         if bold_heading:
-            page.insert_text((200.0, 400.0), 'CHAPTER 1: INTRODUCTION',
-                             fontname='tibo', fontsize=14)
-        path = str(Path(self.tmp) / f'p{pitch}{bold_heading}.pdf')
+            page.insert_text(
+                (200.0, 400.0), "CHAPTER 1: INTRODUCTION", fontname="tibo", fontsize=14
+            )
+        path = str(Path(self.tmp) / f"p{pitch}{bold_heading}.pdf")
         doc.save(path)
         doc.close()
         return path
 
     def test_double_spacing_is_measured(self):
-        measured = inspect_pdf(self._pdf(24.0))['pages'][0]['estimated_line_spacing']
-        self.assertAlmostEqual(measured if measured is not None else 0.0, 2.0,
-                               places=1)
+        measured = inspect_pdf(self._pdf(24.0))["pages"][0]["estimated_line_spacing"]
+        self.assertAlmostEqual(measured if measured is not None else 0.0, 2.0, places=1)
 
     def test_single_spacing_is_still_measured(self):
         info = inspect_pdf(self._pdf(14.0))
-        self.assertLess(info['pages'][0]['estimated_line_spacing'], 1.3)
+        self.assertLess(info["pages"][0]["estimated_line_spacing"], 1.3)
 
     def test_span_weight_is_recorded(self):
         info = inspect_pdf(self._pdf(24.0, bold_heading=True))
-        heading = next(s for s in info['pages'][0]['spans']
-                       if s['text'].startswith('CHAPTER'))
-        self.assertTrue(heading.get('bold'))
+        heading = next(s for s in info["pages"][0]["spans"] if s["text"].startswith("CHAPTER"))
+        self.assertTrue(heading.get("bold"))
 
     def test_body_span_is_not_marked_bold(self):
         info = inspect_pdf(self._pdf(24.0, bold_heading=True))
-        body = next(s for s in info['pages'][0]['spans']
-                    if s['text'].startswith('hospital'))
-        self.assertIs(body.get('bold'), False)
+        body = next(s for s in info["pages"][0]["spans"] if s["text"].startswith("hospital"))
+        self.assertIs(body.get("bold"), False)
 
 
 class TitleCase(unittest.TestCase):
     """
     Test the title case conversion for heading rules.
     """
+
     def setUp(self):
-        self.pg = {'page': 1, 'width_pt': 595.0, 'height_pt': 842.0, 'width_mm': 210.0,
-            'height_mm': 297.0, 'dominant_font': 'Times New Roman',
-            'dominant_font_size': 12.0, 'estimated_line_spacing': 2.0,
-            'margins': {}, 'spans': [], 'lines': [
-                {'text': '1.1 Background', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
-                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
-            ]}
-        self.info = {'page_count': 1, 'pages': [self.pg], 'text': '', 'searchable': True,
-                    'page_sizes': [(595.0, 842.0)]}
-    
+        self.pg = {
+            "page": 1,
+            "width_pt": 595.0,
+            "height_pt": 842.0,
+            "width_mm": 210.0,
+            "height_mm": 297.0,
+            "dominant_font": "Times New Roman",
+            "dominant_font_size": 12.0,
+            "estimated_line_spacing": 2.0,
+            "margins": {},
+            "spans": [],
+            "lines": [
+                {"text": "1.1 Background", "bbox": (99.0, 70.0, 220.0, 88.0), "font_size": 12.0},
+                {
+                    "text": "1.5 Scope and Significance",
+                    "bbox": (99.0, 130.0, 300.0, 148.0),
+                    "font_size": 12.0,
+                },
+            ],
+        }
+        self.info = {
+            "page_count": 1,
+            "pages": [self.pg],
+            "text": "",
+            "searchable": True,
+            "page_sizes": [(595.0, 842.0)],
+        }
+
     def test_to_title_case(self):
-        self.assertEqual(_to_title_case('of mice and man') == 'of mice and man', False)
-        self.assertEqual(_to_title_case('university of ottawa'), 'University of Ottawa')
-        self.assertEqual(_to_title_case('the impact of technology'), 'The Impact of Technology')
-        self.assertEqual(_to_title_case('a study of the effects of technology'), 'A Study of the Effects of Technology')
-        self.assertEqual(_to_title_case('1.1 Background'), '1.1 Background')
-        self.assertEqual(_to_title_case('1.5 Scope and Significance'), '1.5 Scope and Significance')
-        self.assertEqual(_to_title_case("1.1 You and me will buy an AI subscriptions"),"1.1 You and Me Will Buy an AI Subscriptions")
-    
+        self.assertEqual(_to_title_case("of mice and man") == "of mice and man", False)
+        self.assertEqual(_to_title_case("university of ottawa"), "University of Ottawa")
+        self.assertEqual(_to_title_case("the impact of technology"), "The Impact of Technology")
+        self.assertEqual(
+            _to_title_case("a study of the effects of technology"),
+            "A Study of the Effects of Technology",
+        )
+        self.assertEqual(_to_title_case("1.1 Background"), "1.1 Background")
+        self.assertEqual(_to_title_case("1.5 Scope and Significance"), "1.5 Scope and Significance")
+        self.assertEqual(
+            _to_title_case("1.1 You and me will buy an AI subscriptions"),
+            "1.1 You and Me Will Buy an AI Subscriptions",
+        )
+
     def test_uppercase_validation_failed(self):
         info = self.info
-        info['pages'][0]['lines']= [
-                {'text': '1.1 BACKGROUND', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
-                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
-            ]
-        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'UPPER CASE',
-                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
-        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
-            self.assertEqual(r['status'], 'FAIL')
+        info["pages"][0]["lines"] = [
+            {"text": "1.1 BACKGROUND", "bbox": (99.0, 70.0, 220.0, 88.0), "font_size": 12.0},
+            {
+                "text": "1.5 Scope and Significance",
+                "bbox": (99.0, 130.0, 300.0, 148.0),
+                "font_size": 12.0,
+            },
+        ]
+        rule = {
+            "type": "heading_case",
+            "target": "Section Heading",
+            "value": "UPPER CASE",
+            "final_severity": "Mandatory",
+            "enabled": True,
+            "source_page": 2,
+        }
+        for r in validate_all_profile_rules({"deterministic_rules": [rule]}, self.info):
+            self.assertEqual(r["status"], "FAIL")
+
     def test_uppercase_validation_success(self):
         info = self.info
-        info['pages'][0]['lines']= [
-                {'text': '1.1 BACKGROUND', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
-                {'text': '1.5 SCOPE AND SIGNIFICANCE', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
-            ]
-        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'UPPER CASE',
-                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
-        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
-            self.assertEqual(r['status'], 'PASS')
+        info["pages"][0]["lines"] = [
+            {"text": "1.1 BACKGROUND", "bbox": (99.0, 70.0, 220.0, 88.0), "font_size": 12.0},
+            {
+                "text": "1.5 SCOPE AND SIGNIFICANCE",
+                "bbox": (99.0, 130.0, 300.0, 148.0),
+                "font_size": 12.0,
+            },
+        ]
+        rule = {
+            "type": "heading_case",
+            "target": "Section Heading",
+            "value": "UPPER CASE",
+            "final_severity": "Mandatory",
+            "enabled": True,
+            "source_page": 2,
+        }
+        for r in validate_all_profile_rules({"deterministic_rules": [rule]}, self.info):
+            self.assertEqual(r["status"], "PASS")
+
     def test_title_case_validation_failed(self):
         info = self.info
-        info['pages'][0]['lines']= [
-                {'text': '1.5 of mice and man', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
-                {'text': '1.1 Something to', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
-            ]
-        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'Title Case',
-                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
-        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
-            self.assertEqual(r['status'], 'FAIL')
+        info["pages"][0]["lines"] = [
+            {"text": "1.5 of mice and man", "bbox": (99.0, 70.0, 220.0, 88.0), "font_size": 12.0},
+            {"text": "1.1 Something to", "bbox": (99.0, 130.0, 300.0, 148.0), "font_size": 12.0},
+        ]
+        rule = {
+            "type": "heading_case",
+            "target": "Section Heading",
+            "value": "Title Case",
+            "final_severity": "Mandatory",
+            "enabled": True,
+            "source_page": 2,
+        }
+        for r in validate_all_profile_rules({"deterministic_rules": [rule]}, self.info):
+            self.assertEqual(r["status"], "FAIL")
+
     def test_title_case_validation_success(self):
         info = self.info
-        info['pages'][0]['lines']= [
-                {'text': '1.1 Background', 'bbox': (99.0, 70.0, 220.0, 88.0), 'font_size': 12.0},
-                {'text': '1.5 Scope and Significance', 'bbox': (99.0, 130.0, 300.0, 148.0), 'font_size': 12.0},
-            ]
-        rule = {'type': 'heading_case', 'target': 'Section Heading', 'value': 'Title Case',
-                'final_severity': 'Mandatory', 'enabled': True, 'source_page': 2}
-        for r in validate_all_profile_rules({'deterministic_rules':[rule]},self.info):
-            self.assertEqual(r['status'], 'PASS')
+        info["pages"][0]["lines"] = [
+            {"text": "1.1 Background", "bbox": (99.0, 70.0, 220.0, 88.0), "font_size": 12.0},
+            {
+                "text": "1.5 Scope and Significance",
+                "bbox": (99.0, 130.0, 300.0, 148.0),
+                "font_size": 12.0,
+            },
+        ]
+        rule = {
+            "type": "heading_case",
+            "target": "Section Heading",
+            "value": "Title Case",
+            "final_severity": "Mandatory",
+            "enabled": True,
+            "source_page": 2,
+        }
+        for r in validate_all_profile_rules({"deterministic_rules": [rule]}, self.info):
+            self.assertEqual(r["status"], "PASS")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main(verbosity=2)

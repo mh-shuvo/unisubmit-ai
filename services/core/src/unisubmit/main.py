@@ -63,6 +63,7 @@ templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
 templates.env.globals["default_llm_model"] = settings.ollama_model
 
+
 @app.on_event("startup")
 def startup():
     # Validation jobs run in a separate process, `python -m unisubmit.worker` (DEF-024).
@@ -163,9 +164,7 @@ def _dedupe_semantic_requirements(profile):
                     evid.append(x)
             if evid:
                 base["evidence"] = " | ".join(evid)[:1600]
-            base["merged_duplicate_count"] = (
-                int(base.get("merged_duplicate_count") or 0) + 1
-            )
+            base["merged_duplicate_count"] = int(base.get("merged_duplicate_count") or 0) + 1
     profile["semantic_requirements"] = merged
     return profile
 
@@ -246,10 +245,7 @@ def _profile_rule_stats(profile, results, additional_rules):
 
 def _report_run_token(version):
     raw = (version.ai_run_reference or "deterministic").strip() or "deterministic"
-    return (
-        "".join(ch for ch in raw if ch.isalnum() or ch in ("-", "_"))[:80]
-        or "deterministic"
-    )
+    return "".join(ch for ch in raw if ch.isalnum() or ch in ("-", "_"))[:80] or "deterministic"
 
 
 def admin_user(request: Request, db: Session):
@@ -338,9 +334,7 @@ def guidelines(request: Request, db: Session = Depends(get_db)):
         .order_by(TemplateVersion.created_at.desc())
         .all()
     )
-    return templates.TemplateResponse(
-        "guidelines.html", {"request": request, "versions": versions}
-    )
+    return templates.TemplateResponse("guidelines.html", {"request": request, "versions": versions})
 
 
 @app.get("/guidelines/{version_id}/download")
@@ -427,9 +421,7 @@ def student_login(
         .first()
     )
     if not s or not verify_password(password, s.password_hash):
-        return RedirectResponse(
-            flash_url("/student/login", error="Invalid email or password"), 303
-        )
+        return RedirectResponse(flash_url("/student/login", error="Invalid email or password"), 303)
     request.session.clear()
     request.session["student_id"] = s.id
     return RedirectResponse("/student/dashboard", 303)
@@ -452,9 +444,7 @@ def student_dashboard(request: Request, db: Session = Depends(get_db)):
     )
     counts = {
         "total": len(rows),
-        "queued": sum(
-            1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")
-        ),
+        "queued": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
         "revision": sum(1 for x in rows if x.status == "REVISION REQUIRED"),
         "passed": sum(1 for x in rows if x.status == "PASSED"),
     }
@@ -467,9 +457,7 @@ def student_dashboard(request: Request, db: Session = Depends(get_db)):
 @app.get("/student/profile", response_class=HTMLResponse)
 def student_profile(request: Request, db: Session = Depends(get_db)):
     s = require_student(request, db)
-    return templates.TemplateResponse(
-        "student_profile.html", {"request": request, "student": s}
-    )
+    return templates.TemplateResponse("student_profile.html", {"request": request, "student": s})
 
 
 # ---------- admin auth ----------
@@ -494,9 +482,7 @@ def admin_login(
         .first()
     )
     if not u or not verify_password(password, u.password_hash):
-        return RedirectResponse(
-            flash_url("/admin/login", error="Invalid admin credentials"), 303
-        )
+        return RedirectResponse(flash_url("/admin/login", error="Invalid admin credentials"), 303)
     request.session.clear()
     request.session["admin_id"] = u.id
     return RedirectResponse("/admin", 303)
@@ -516,9 +502,7 @@ def admin_dashboard(request: Request, db: Session = Depends(get_db)):
             "faculties": db.query(Faculty).count(),
             "departments": db.query(Department).count(),
             "institutes": db.query(Institute).count(),
-            "admins": db.query(AdminUser)
-            .filter(AdminUser.role == "UNIT_ADMIN")
-            .count(),
+            "admins": db.query(AdminUser).filter(AdminUser.role == "UNIT_ADMIN").count(),
         }
     else:
         programs = unit_programs(db, u)
@@ -535,9 +519,7 @@ def admin_dashboard(request: Request, db: Session = Depends(get_db)):
             "programs": len(programs),
             "supervisors": len(teachers),
             "submissions": len(rows),
-            "queue": sum(
-                1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")
-            ),
+            "queue": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
         }
     return templates.TemplateResponse(
         "admin_dashboard.html", {"request": request, "admin": u, "metrics": metrics}
@@ -578,9 +560,7 @@ def add_faculty(
         return RedirectResponse(
             flash_url("/admin/structure", error="Faculty name/code already exists"), 303
         )
-    return RedirectResponse(
-        flash_url("/admin/structure", message="Faculty created"), 303
-    )
+    return RedirectResponse(flash_url("/admin/structure", message="Faculty created"), 303)
 
 
 @app.post("/admin/institutes")
@@ -600,9 +580,7 @@ def add_institute(
             flash_url("/admin/structure", error="Institute name/code already exists"),
             303,
         )
-    return RedirectResponse(
-        flash_url("/admin/structure", message="Institute created"), 303
-    )
+    return RedirectResponse(flash_url("/admin/structure", message="Institute created"), 303)
 
 
 @app.post("/admin/departments")
@@ -614,9 +592,7 @@ def add_department(
     db: Session = Depends(get_db),
 ):
     require_super(request, db)
-    db.add(
-        Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty_id)
-    )
+    db.add(Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty_id))
     try:
         db.commit()
     except Exception:
@@ -625,9 +601,7 @@ def add_department(
             flash_url("/admin/structure", error="Department name/code already exists"),
             303,
         )
-    return RedirectResponse(
-        flash_url("/admin/structure", message="Department created"), 303
-    )
+    return RedirectResponse(flash_url("/admin/structure", message="Department created"), 303)
 
 
 @app.get("/admin/admins", response_class=HTMLResponse)
@@ -674,9 +648,7 @@ def create_unit_admin(
         db.commit()
     except Exception:
         db.rollback()
-        return RedirectResponse(
-            flash_url("/admin/admins", error="Admin email already exists"), 303
-        )
+        return RedirectResponse(flash_url("/admin/admins", error="Admin email already exists"), 303)
     return RedirectResponse(
         flash_url("/admin/admins", message="Department/Institute Admin created"), 303
     )
@@ -778,12 +750,8 @@ def unit_add_supervisor(
         db.commit()
     except Exception:
         db.rollback()
-        return RedirectResponse(
-            flash_url("/admin/supervisors", error="Email already exists"), 303
-        )
-    return RedirectResponse(
-        flash_url("/admin/supervisors", message="Supervisor added"), 303
-    )
+        return RedirectResponse(flash_url("/admin/supervisors", error="Email already exists"), 303)
+    return RedirectResponse(flash_url("/admin/supervisors", message="Supervisor added"), 303)
 
 
 @app.get("/admin/configuration", response_class=HTMLResponse)
@@ -793,9 +761,7 @@ def unit_configuration(request: Request, db: Session = Depends(get_db)):
         return HTTPException(403)
     programs = unit_programs(db, u)
     ids = [p.id for p in programs]
-    configs = (
-        db.query(Template).filter(Template.program_id.in_(ids)).all() if ids else []
-    )
+    configs = db.query(Template).filter(Template.program_id.in_(ids)).all() if ids else []
     return templates.TemplateResponse(
         "unit_configuration.html",
         {
@@ -922,9 +888,7 @@ def add_version(
 
 
 @app.get("/admin/template-version/{version_id}", response_class=HTMLResponse)
-def template_version_page(
-    version_id: int, request: Request, db: Session = Depends(get_db)
-):
+def template_version_page(version_id: int, request: Request, db: Session = Depends(get_db)):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -993,9 +957,7 @@ def review_guideline_rules(
                     {
                         "kind": key,
                         "index": idx,
-                        "rule": r.get("type")
-                        or r.get("requirement")
-                        or f"Rule {idx+1}",
+                        "rule": r.get("type") or r.get("requirement") or f"Rule {idx + 1}",
                         "from": old,
                         "to": val,
                     }
@@ -1097,9 +1059,7 @@ def add_manual_semantic_rule(
         if after > before
         else "An equivalent semantic rule already exists; duplicate was merged with the canonical rule."
     )
-    return RedirectResponse(
-        flash_url(f"/admin/template-version/{version_id}", message=msg), 303
-    )
+    return RedirectResponse(flash_url(f"/admin/template-version/{version_id}", message=msg), 303)
 
 
 @app.post("/admin/template-version/{version_id}/semantic-rules/{semantic_id}/update")
@@ -1179,11 +1139,7 @@ def delete_manual_semantic_rule(
         profile = {}
     profile = _normalize_profile_severities(profile)
     old = profile.get("semantic_requirements", []) or []
-    new = [
-        r
-        for r in old
-        if not (str(r.get("semantic_id")) == semantic_id and r.get("manual"))
-    ]
+    new = [r for r in old if not (str(r.get("semantic_id")) == semantic_id and r.get("manual"))]
     if len(new) == len(old):
         return RedirectResponse(
             flash_url(
@@ -1206,9 +1162,7 @@ def delete_manual_semantic_rule(
 
 
 @app.post("/admin/template-version/{version_id}/activate-profile")
-def activate_guideline_profile(
-    version_id: int, request: Request, db: Session = Depends(get_db)
-):
+def activate_guideline_profile(version_id: int, request: Request, db: Session = Depends(get_db)):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -1218,8 +1172,7 @@ def activate_guideline_profile(
     except Exception:
         profile = {}
     if not profile or (
-        not profile.get("deterministic_rules")
-        and not profile.get("semantic_requirements")
+        not profile.get("deterministic_rules") and not profile.get("semantic_requirements")
     ):
         return RedirectResponse(
             flash_url(
@@ -1286,9 +1239,7 @@ def add_restriction(
 
 
 @app.post("/admin/template-version/{version_id}/index")
-async def index_guideline(
-    version_id: int, request: Request, db: Session = Depends(get_db)
-):
+async def index_guideline(version_id: int, request: Request, db: Session = Depends(get_db)):
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role == "SUPER_ADMIN" or not same_unit(tv.template.program, u):
@@ -1406,7 +1357,7 @@ async def index_guideline(
     return RedirectResponse(
         flash_url(
             f"/admin/template-version/{version_id}",
-            error=f'Guideline parsing succeeded, but RAG indexing failed: {result.get("detail","Unknown indexing error")}',
+            error=f"Guideline parsing succeeded, but RAG indexing failed: {result.get('detail', 'Unknown indexing error')}",
         ),
         303,
     )
@@ -1510,13 +1461,7 @@ def submit(
     p = db.get(Program, program_id)
     teacher = db.get(Teacher, teacher_id)
     tv = db.get(TemplateVersion, template_version_id)
-    if (
-        not p
-        or not same_unit(p, s)
-        or not teacher
-        or not tv
-        or tv.template.program_id != p.id
-    ):
+    if not p or not same_unit(p, s) or not teacher or not tv or tv.template.program_id != p.id:
         raise HTTPException(400, "Invalid selection")
     if s.department_id and teacher.department_id != s.department_id:
         raise HTTPException(403)
@@ -1601,10 +1546,7 @@ def save_queue_version(sub, pdf, db):
         .scalar()
         or 0
     ) + 1
-    dest = (
-        SUBMISSION_STORE
-        / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
-    )
+    dest = SUBMISSION_STORE / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
     with dest.open("wb") as f:
         shutil.copyfileobj(pdf.file, f)
     try:
@@ -1629,9 +1571,7 @@ def save_queue_version(sub, pdf, db):
 
 
 @app.get("/submission/{submission_id}", response_class=HTMLResponse)
-def view_submission(
-    submission_id: int, request: Request, db: Session = Depends(get_db)
-):
+def view_submission(submission_id: int, request: Request, db: Session = Depends(get_db)):
     s = require_student(request, db)
     sub = db.get(Submission, submission_id)
     if not sub or sub.student_user_id != s.id:
@@ -1654,9 +1594,7 @@ def view_submission(
 
 
 @app.get("/files/submission/{version_id}")
-def download_submission(
-    version_id: int, request: Request, db: Session = Depends(get_db)
-):
+def download_submission(version_id: int, request: Request, db: Session = Depends(get_db)):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
     if not v or v.submission.student_user_id != s.id:
@@ -1679,27 +1617,17 @@ def view_validation_report(
         raise HTTPException(404)
     parsed = parse_ai_report(v.ai_suggestions or "")
     results = json.loads(v.validation_json or "[]")
-    stats_entry = next(
-        (r for r in results if r.get("category") == "Validation Statistics"), None
-    )
-    visible_results = [
-        r for r in results if r.get("category") != "Validation Statistics"
-    ]
-    format_results = [
-        r for r in visible_results if r.get("category") == "Formatting Compliance"
-    ]
-    semantic_results = [
-        r for r in visible_results if r.get("category") == "Semantic Compliance"
-    ]
+    stats_entry = next((r for r in results if r.get("category") == "Validation Statistics"), None)
+    visible_results = [r for r in results if r.get("category") != "Validation Statistics"]
+    format_results = [r for r in visible_results if r.get("category") == "Formatting Compliance"]
+    semantic_results = [r for r in visible_results if r.get("category") == "Semantic Compliance"]
     restriction_results = [
         r
         for r in visible_results
         if r.get("category") not in {"Formatting Compliance", "Semantic Compliance"}
     ]
     failed_format = [r for r in format_results if r.get("status") == "FAIL"]
-    affected_pages = sorted(
-        {p for r in failed_format for p in (r.get("affected_pages") or [])}
-    )
+    affected_pages = sorted({p for r in failed_format for p in (r.get("affected_pages") or [])})
     stats = (stats_entry or {}).get("statistics") or {}
     report_summary = {
         "format_failures": len(failed_format),
@@ -1730,9 +1658,7 @@ def view_validation_report(
 
 
 @app.get("/files/report/{version_id}")
-def download_report_legacy(
-    version_id: int, request: Request, db: Session = Depends(get_db)
-):
+def download_report_legacy(version_id: int, request: Request, db: Session = Depends(get_db)):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
     if not v or v.submission.student_user_id != s.id:
@@ -1751,11 +1677,7 @@ def download_report_bound(
 ):
     s = require_student(request, db)
     v = db.get(SubmissionVersion, version_id)
-    if (
-        not v
-        or v.submission.student_user_id != s.id
-        or v.submission_id != submission_id
-    ):
+    if not v or v.submission.student_user_id != s.id or v.submission_id != submission_id:
         raise HTTPException(404)
     current_token = _report_run_token(v)
     if run_token != current_token:
@@ -1768,9 +1690,7 @@ def download_report_bound(
         REPORT_STORE
         / f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
     )
-    build_validation_report(
-        str(report), v.submission, v, results, v.ai_suggestions or ""
-    )
+    build_validation_report(str(report), v.submission, v, results, v.ai_suggestions or "")
     if v.report_path != str(report):
         v.report_path = str(report)
         db.commit()
@@ -1779,9 +1699,7 @@ def download_report_bound(
         "Pragma": "no-cache",
         "X-UniSubmit-Validation-Run": current_token,
     }
-    filename = (
-        f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
-    )
+    filename = f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
     return FileResponse(
         str(report), media_type="application/pdf", filename=filename, headers=headers
     )
@@ -1853,26 +1771,20 @@ async def process_job(db, job):
         semantic_results = ai.get("semantic_results") or []
         results.extend(semantic_results)
         if any(
-            r.get("severity") == "Mandatory" and r.get("status") == "FAIL"
-            for r in semantic_results
+            r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in semantic_results
         ):
             final_status = "REVISION REQUIRED"
     elif sub.ai_profile:
         ai_text = "Guideline has not been indexed into the AI knowledge base yet. Additional deterministic restrictions were checked."
     stats = _profile_rule_stats(fmt_profile, results, tv.rules)
-    results.append(
-        {"category": "Validation Statistics", "status": "META", "statistics": stats}
-    )
+    results.append({"category": "Validation Statistics", "status": "META", "statistics": stats})
     sv.validation_json = json.dumps(results)
     sv.ai_suggestions = ai_text
     sv.ai_run_reference = ai_ref
     sv.status = final_status
     sub.status = final_status
     run_token = _report_run_token(sv)
-    report = (
-        REPORT_STORE
-        / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
-    )
+    report = REPORT_STORE / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
     build_validation_report(str(report), sub, sv, results, ai_text)
     sv.report_path = str(report)
     db.commit()

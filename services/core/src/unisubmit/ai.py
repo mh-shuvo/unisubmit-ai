@@ -3,6 +3,7 @@ from .config import settings
 
 SYSTEM_PROMPT = """You are a local academic pre-submission reviewer. You do not academically approve a thesis. Based only on the supplied approved guideline context and student text, produce concise improvement suggestions. Separate observations from mandatory compliance. Never invent a rule. Focus on clarity, research structure, methodology description, results/discussion, conclusion, figures/tables, references, and academic writing. Do not rewrite the entire report. Return plain text with 3-8 numbered suggestions. If there is insufficient evidence, say so."""
 
+
 async def get_ollama_status() -> dict:
     """Return connection/model status without raising to the UI."""
     base = settings.ollama_url.rstrip("/")
@@ -24,12 +25,14 @@ async def get_ollama_status() -> dict:
             result["models"] = names
             configured = settings.ollama_model
             result["model_installed"] = configured in names or any(
-                n.split(":")[0] == configured.split(":")[0] and configured.split(":")[-1] == "latest"
+                n.split(":")[0] == configured.split(":")[0]
+                and configured.split(":")[-1] == "latest"
                 for n in names
             )
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
 
 async def test_ollama_model() -> tuple[bool, str]:
     base = settings.ollama_url.rstrip("/")
@@ -41,7 +44,10 @@ async def test_ollama_model() -> tuple[bool, str]:
                     "model": settings.ollama_model,
                     "stream": False,
                     "messages": [
-                        {"role": "system", "content": "You are a concise system health-check assistant."},
+                        {
+                            "role": "system",
+                            "content": "You are a concise system health-check assistant.",
+                        },
                         {"role": "user", "content": "Reply exactly: UniSubmit AI model is ready."},
                     ],
                     "options": {"temperature": 0},
@@ -54,6 +60,7 @@ async def test_ollama_model() -> tuple[bool, str]:
             return True, content
     except Exception as exc:
         return False, str(exc)
+
 
 async def get_improvement_suggestions(guideline_text: str, student_text: str) -> str:
     context = guideline_text[:12000]

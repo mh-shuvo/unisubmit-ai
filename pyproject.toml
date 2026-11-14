@@ -18,4 +18,16 @@ constraint-dependencies = [
 members = ["services/core", "services/ai"]
 
 [dependency-groups]
-dev = ["pytest>=9.2"]
+dev = ["pytest>=9.2", "ruff>=0.17.5"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# ASYNC: blocking calls in async code; DTZ: naive datetimes; S: security; PTH: pathlib
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "S", "ASYNC", "DTZ", "PTH", "RUF", "PL"]
+ignore = ["PLR0913"]  # FastAPI endpoints legitimately take many parameters
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "PLR2004"]
