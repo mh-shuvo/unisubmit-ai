@@ -18,7 +18,7 @@ constraint-dependencies = [
 members = ["services/core", "services/ai"]
 
 [dependency-groups]
-dev = ["pytest>=9.2", "ruff>=0.17.5"]
+dev = ["pytest>=9.2", "ruff>=0.17.5", "mypy>=2.4"]
 
 [tool.ruff]
 line-length = 100
@@ -50,3 +50,40 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 "services/core/src/unisubmit/validators.py" = ["E501", "PLR0911", "PLR0912", "PLR2004", "RUF001"]
 "services/core/src/unisubmit/worker.py" = ["DTZ003", "SIM105"]
 "tools/model_verification/verify_model_integrity.py" = ["B007", "E501", "PTH123", "RUF002", "S105", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = ["services/core/src", "services/ai/src"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["fitz.*", "pymupdf.*", "reportlab.*", "FlagEmbedding.*"]
+ignore_missing_imports = true
+
+# Legacy baseline (P1.4): modules moved unchanged in P1.2 are not type-checked
+# yet (about 100 errors, mostly inference on untyped dicts and Starlette's old
+# TemplateResponse(name, context) form). New modules are strict; a module
+# leaves this list when it is typed, at the latest when it is split in
+# Phases 5 and 6.
+[[tool.mypy.overrides]]
+module = [
+  "unisubmit.ai",
+  "unisubmit.ai_service_client",
+  "unisubmit.config",
+  "unisubmit.db",
+  "unisubmit.emailer",
+  "unisubmit.format_validation",
+  "unisubmit.main",
+  "unisubmit.models",
+  "unisubmit.pdf_utils",
+  "unisubmit.report_parser",
+  "unisubmit.reporting",
+  "unisubmit.security",
+  "unisubmit.seed",
+  "unisubmit.validators",
+  "unisubmit.worker",
+  "unisubmit_ai.main",
+]
+ignore_errors = true
