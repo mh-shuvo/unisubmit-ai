@@ -64,3 +64,9 @@ class PageRenderingTests(AppTestCase):
             "/admin/login", data={"email": "platform@example.edu", "password": PLATFORM_PASSWORD}
         )
         self.assertEqual(self.statuses(client, PLATFORM_ADMIN), dict.fromkeys(PLATFORM_ADMIN, 200))
+
+    def test_unit_pages_refuse_a_university_admin(self):
+        """DEF-049: every unit page answers 403 to another admin role."""
+        client = self.logged_in_admin("university.admin@example.edu")
+        unit_only = [path for path in UNIT_ADMIN if path != "/admin"]
+        self.assertEqual(self.statuses(client, unit_only), dict.fromkeys(unit_only, 403))

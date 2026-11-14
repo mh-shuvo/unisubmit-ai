@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-56 entries: 48 defects and 8 limitations. 11 open, 45 closed.
+58 entries: 50 defects and 8 limitations. 9 open, 49 closed.
 
 ---
 
@@ -30,8 +30,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [DEF-038](DEF-038.md) | Guideline parsing and indexing run inside the admin's HTTP request for up to 25 minutes | defect | `timeout-misalignment` | major | Any deployment behind a proxy with a shorter timeout | 2026-11-14 |
 | [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | minor | Nothing; matters after a database leak | 2026-11-14 |
 | [DEF-041](DEF-041.md) | Forms carry no CSRF token and logout is a GET | defect | `insecure-default` | minor | Nothing; `SameSite=Lax` covers the common case | 2026-11-14 |
-| [DEF-042](DEF-042.md) | File paths are stored as absolute, environment-specific paths | defect | `runtime-environment` | major | Running the web app natively against the Docker database; moving storage | 2026-11-14 |
-| [DEF-043](DEF-043.md) | Supervisor emails and unit names are unique across the whole installation | defect | `scope-leakage` | minor | Joint appointments; any second university | 2026-11-14 |
 | [DEF-044](DEF-044.md) | The web app's copy of the semantic-rule merge still misreads scalar `source_pages` | defect | `llm-output-contract` | major | Saving a parsed profile whose model output gives pages as a number | 2026-11-14 |
 
 ---
@@ -89,13 +87,18 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-047](DEF-047.md) | Every HTML page fails with 500 after the Starlette 1.x upgrade, and no test rendered a page | defect | `dependency-api-drift` | Interface | v10.0, `64556cd` (introduced and fixed before merge) | `PageRenderingTests` |
 | [DEF-048](DEF-048.md) | In the uv-built images, every console script points at an interpreter that does not exist | defect | `runtime-environment` | Build/Package | v10.0, `e884275` (introduced and fixed before merge) | none |
 | [LIM-006](LIM-006.md) | The test suite runs only when invoked by hand | limitation | `observability-gap` | n/a | v10.0, `4bb65a6` | `.github/workflows/ci.yml` |
+| [DEF-042](DEF-042.md) | File paths are stored as absolute, environment-specific paths | defect | `runtime-environment` | Assignment/Initialisation | v10.1, `e44df44` | `test_uploads_are_stored_in_the_universitys_folder` |
+| [DEF-043](DEF-043.md) | Supervisor emails and unit names are unique across the whole installation | defect | `scope-leakage` | Relationship | v10.1, `e44df44` | `test_same_supervisor_email_may_exist_in_two_universities` |
+| [DEF-049](DEF-049.md) | The submission configuration page returns its refusal instead of raising it | defect | `insecure-default` | Checking | v10.1, `e44df44` | `test_unit_pages_refuse_a_university_admin` |
+| [DEF-050](DEF-050.md) | Adopting a pre-migration database compared it with the latest models | defect | `schema-drift` | Algorithm/Method | v10.1, `e44df44` (introduced and fixed before merge) | `test_v9_14_database_is_adopted_and_upgraded` |
 
 `DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are
 not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
 `CHANGELOG_v9_13.md`; `DEF-024` to `DEF-036`, `DEF-045` and `LIM-008` (Phase 0 of the
 restructuring plan, branch `phase-0-demo-critical-fixes`) in
 `CHANGELOG_v9_14.md`; `DEF-039`, `DEF-046` to `DEF-048` and `LIM-006` (Phase 1, branch
-`phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`. `DEF-017` to `DEF-019` are on branch
+`phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`; `DEF-042`, `DEF-043`,
+`DEF-049` and `DEF-050` (Phase 2, same branch) in `CHANGELOG_v10_1.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---
@@ -168,8 +171,8 @@ only by booting the deployment from empty volumes. [DEF-046](DEF-046.md) is
 the DEF-026 fix's own gap: the lock was released one commit too early, and a
 concurrency test hid it until a faster database driver changed the timing.
 
-**T8 — Deployment readiness: secure defaults, isolation and schema lifecycle** (10)
-[DEF-027](DEF-027.md) · [DEF-028](DEF-028.md) · [DEF-029](DEF-029.md) · [DEF-030](DEF-030.md) · [DEF-039](DEF-039.md) · [DEF-040](DEF-040.md) · [DEF-041](DEF-041.md) · [DEF-042](DEF-042.md) · [DEF-043](DEF-043.md) · [DEF-048](DEF-048.md)
+**T8 — Deployment readiness: secure defaults, isolation and schema lifecycle** (12)
+[DEF-027](DEF-027.md) · [DEF-028](DEF-028.md) · [DEF-029](DEF-029.md) · [DEF-030](DEF-030.md) · [DEF-039](DEF-039.md) · [DEF-040](DEF-040.md) · [DEF-041](DEF-041.md) · [DEF-042](DEF-042.md) · [DEF-043](DEF-043.md) · [DEF-048](DEF-048.md) · [DEF-049](DEF-049.md) · [DEF-050](DEF-050.md)
 
 What it takes to run the system somewhere other than the developer's laptop.
 Four of these were defaults that kept the system running insecurely without
@@ -181,12 +184,12 @@ anyone choosing it, which is the argument for failing closed at startup.
 
 Maintained by hand. Update them in the same edit that adds or closes an entry.
 
-### By class, all 56 entries
+### By class, all 58 entries
 
 | Class | Count |
 |-------|-------|
 | `nl-to-rule-translation` | 7 |
-| `insecure-default` | 6 |
+| `insecure-default` | 7 |
 | `observability-gap` | 6 |
 | `llm-output-contract` | 4 |
 | `job-coordination` | 5 |
@@ -201,47 +204,47 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `dependency-api-drift` | 3 |
 | `runtime-environment` | 3 |
 | `fail-open` | 1 |
-| `schema-drift` | 1 |
-| **Total** | **56** |
+| `schema-drift` | 2 |
+| **Total** | **58** |
 
-### By ODC defect type, the 48 `DEF` entries
+### By ODC defect type, the 50 `DEF` entries
 
-Limitations carry no ODC triple, so these sum to 48 rather than 56.
+Limitations carry no ODC triple, so these sum to 50 rather than 58.
 
 | Defect type | Count |
 |-------------|-------|
-| Algorithm/Method | 12 |
-| Checking | 12 |
+| Algorithm/Method | 13 |
+| Checking | 13 |
 | Timing/Serialisation | 9 |
 | Assignment/Initialisation | 7 |
 | Function | 3 |
 | Interface | 2 |
 | Build/Package | 2 |
 | Relationship | 1 |
-| **Total** | **48** |
+| **Total** | **50** |
 
 | Qualifier | Count |
 |-----------|-------|
-| Incorrect | 30 |
+| Incorrect | 32 |
 | Missing | 16 |
 | Extraneous | 2 |
 
-### By trigger, the 48 `DEF` entries
+### By trigger, the 50 `DEF` entries
 
 The trigger is also the detection method: how the defect actually surfaced.
 
 | Trigger | Count |
 |---------|-------|
-| Logic/Flow | 23 |
+| Logic/Flow | 24 |
 | Design Conformance | 8 |
 | Normal Mode | 5 |
 | Workload/Stress | 2 |
 | Hardware/Software Configuration | 3 |
 | Concurrency | 3 |
 | Lateral Compatibility | 2 |
-| Complex Path | 1 |
+| Complex Path | 2 |
 | Rare Situation | 1 |
-| **Total** | **48** |
+| **Total** | **50** |
 
 Worth noting when this table is quoted: 8 of the first 23 were found by
 comparing behaviour against the guideline's intent, and all 8 of those are in
@@ -255,14 +258,14 @@ have revealed them; the exceptions, [DEF-032](DEF-032.md) and
 [DEF-044](DEF-044.md), would have shown up only as a wrong citation or a
 crash on an unusual model response.
 
-### By severity, all 56 entries
+### By severity, all 58 entries
 
 | Severity | Count |
 |----------|-------|
-| blocking | 18 |
+| blocking | 19 |
 | major | 28 |
-| minor | 10 |
-| **Total** | **56** |
+| minor | 11 |
+| **Total** | **58** |
 
 ---
 

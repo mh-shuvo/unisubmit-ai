@@ -7,12 +7,18 @@ Known defects, fixed defects and standing limitations are recorded in the
 
 ## Core roles
 
-### Super Admin
-- Create Faculty, Department and Institute records
+Several universities share one installation. Each is a separate tenant: its
+units, guidelines, accounts and files are invisible to the others.
+
+### Platform Admin
+- Create a university together with its first University Admin
+- Rename a university, or deactivate it, which signs out all its users
+- AI service monitoring
+- Belongs to no university and sees no university's academic data
+
+### University Admin (was Super Admin)
+- Create Faculty, Department and Institute records for one university
 - Create Department/Institute Admin accounts and assign each to one unit
-- View system structure
-- High-level AI service monitoring
-- System, SMTP, audit and security settings
 - Does **not** manage unit programs, supervisors or student submissions
 
 ### Department / Institute Admin
@@ -94,14 +100,16 @@ DOCKER_AI_SERVICE_URL=http://ai-service:8001 docker compose --profile ai up -d -
 - PostgreSQL: host port 5433, user `unisubmit`, password from `POSTGRES_PASSWORD`
 
 Every port is bound to `127.0.0.1`, so nothing is reachable from another
-machine. Create the first Super Admin once:
+machine. Create the first Platform Admin once, then sign in and create a
+university with its University Admin under **Universities**:
 
 ```bash
-docker compose exec app unisubmit create-super-admin --email you@example.edu
+docker compose exec app unisubmit create-platform-admin --email you@example.edu
 ```
 
-Add `docker compose exec app unisubmit seed-demo` for the sample faculty,
-programs and supervisors. Stop everything with `docker compose down` (add `-v`
+Add `docker compose exec app unisubmit seed-demo` for a demo university with a
+sample faculty, programs and supervisors. Students register at
+`/u/<university>/register`; the home page lists every active university. Stop everything with `docker compose down` (add `-v`
 to also delete the database, Qdrant index and model cache).
 
 ## Database schema
@@ -125,7 +133,7 @@ Install [uv](https://docs.astral.sh/uv/), then from the repository root:
 uv sync --all-packages
 cp .env.example .env                       # and fill it in
 uv run unisubmit migrate
-uv run unisubmit create-super-admin --email you@example.edu
+uv run unisubmit create-platform-admin --email you@example.edu
 uv run uvicorn unisubmit.main:create_app --factory --reload --port 8000
 uv run python -m unisubmit.worker
 uv run uvicorn unisubmit_ai.main:app --host 127.0.0.1 --port 8001
@@ -133,7 +141,7 @@ uv run uvicorn unisubmit_ai.main:app --host 127.0.0.1 --port 8001
 
 The web app, the worker and the AI service are separate processes; run each in
 its own terminal. There is no built-in admin account;
-`unisubmit create-super-admin` asks for a password of at least 12 characters.
+`unisubmit create-platform-admin` asks for a password of at least 12 characters.
 
 AI health: http://127.0.0.1:8001/health (open; every other route needs the
 `AI_SERVICE_TOKEN` as `Authorization: Bearer <token>`). The embedding model

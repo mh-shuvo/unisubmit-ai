@@ -63,9 +63,12 @@ everything.
    `ai_service/.env` are no longer used and can be deleted.
 5. `uv run pre-commit install`, once, to run the checks on every commit.
 
-The app has not created an admin account since v9.14
-([DEF-028](defects/DEF-028.md)); if none exists yet, run
-`docker compose exec app unisubmit create-super-admin --email you@example.edu`.
+From v10.1 your existing data belongs to a university called "Default
+University" (short name `default`), and every Super Admin is now its
+University Admin. Create a Platform Admin to rename it or add universities:
+`docker compose exec app unisubmit create-platform-admin --email you@example.edu`.
+Files uploaded before v10.1 are moved into `storage/<university>/` by the
+`migrate` step automatically ([DEF-042](defects/DEF-042.md)).
 
 ## Starting the demo
 
