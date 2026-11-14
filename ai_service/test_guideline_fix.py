@@ -77,11 +77,14 @@ class GuidelineFixTests(unittest.TestCase):
         pdf = doc.tobytes()
         doc.close()
         async def send():
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service.app), base_url='http://test') as c:
+            # The service requires its shared token (DEF-029).
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service.app), base_url='http://test',
+                                         headers={'Authorization': 'Bearer ' + 'k' * 40}) as c:
                 return await c.post('/guideline/profile',
                     data=dict(department='CSE', program='BSc', submission_type='Thesis', template_version='1'),
                     files={'pdf':('guideline.pdf', pdf, 'application/pdf')})
-        with patch.object(service, 'call_ollama', new=AsyncMock(return_value=self.result())):
+        with patch.object(service, 'call_ollama', new=AsyncMock(return_value=self.result())), \
+                patch.object(service, 'AI_SERVICE_TOKEN', 'k' * 40):
             response = asyncio.run(send())
         self.assertEqual(response.status_code, 200, response.text)
         diag = response.json()['profile']['parser_diagnostics']

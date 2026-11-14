@@ -8,18 +8,25 @@ from unittest.mock import patch, AsyncMock
 import httpx
 import main as service
 
+# The service requires its shared token on every route but the probes (DEF-029).
+TOKEN = 'test-ai-token-' + 'y' * 40
+
 
 class OfflineClient:
     def post(self, path, json):
         async def send():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service.app),
-                                         base_url='http://test') as client:
+                                         base_url='http://test',
+                                         headers={'Authorization': f'Bearer {TOKEN}'}) as client:
                 return await client.post(path, json=json)
         return asyncio.run(send())
 
 
 class ValidationFixTests(unittest.TestCase):
     def setUp(self):
+        token = patch.object(service, 'AI_SERVICE_TOKEN', TOKEN)
+        token.start()
+        self.addCleanup(token.stop)
         self.client = OfflineClient()  # Deliberately do not run startup.
         self.request = dict(department='CSE', program='MSc', submission_type='Thesis',
                             template_version='v1', student_text='ABSTRACT\nBackground and motivation.\n',
