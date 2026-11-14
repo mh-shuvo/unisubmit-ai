@@ -1,0 +1,27 @@
+# Install once with `uv run pre-commit install`. Every hook runs the tool from
+# uv.lock, so versions never drift from CI.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: mypy
+        name: mypy
+        entry: uv run mypy services/core/src services/ai/src
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: lint-imports
+        name: import contracts
+        entry: uv run lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
