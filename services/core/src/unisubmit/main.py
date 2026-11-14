@@ -302,6 +302,7 @@ def same_unit(program, u):
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, db: DbSession):
     return templates.TemplateResponse(
+        request,
         "home.html",
         {
             "request": request,
@@ -314,7 +315,7 @@ def home(request: Request, db: DbSession):
 
 @router.get("/how-it-works", response_class=HTMLResponse)
 def how_it_works(request: Request):
-    return templates.TemplateResponse("how_it_works.html", {"request": request})
+    return templates.TemplateResponse(request, "how_it_works.html", {"request": request})
 
 
 @router.get("/guidelines", response_class=HTMLResponse)
@@ -325,7 +326,9 @@ def guidelines(request: Request, db: DbSession):
         .order_by(TemplateVersion.created_at.desc())
         .all()
     )
-    return templates.TemplateResponse("guidelines.html", {"request": request, "versions": versions})
+    return templates.TemplateResponse(
+        request, "guidelines.html", {"request": request, "versions": versions}
+    )
 
 
 @router.get("/guidelines/{version_id}/download")
@@ -344,6 +347,7 @@ def guideline_download(version_id: int, db: DbSession):
 @router.get("/student/register", response_class=HTMLResponse)
 def student_register_page(request: Request, db: DbSession):
     return templates.TemplateResponse(
+        request,
         "student_register.html",
         {
             "request": request,
@@ -394,6 +398,7 @@ def student_register(
 @router.get("/student/login", response_class=HTMLResponse)
 def student_login_page(request: Request):
     return templates.TemplateResponse(
+        request,
         "student_login.html",
         {"request": request, "error": request.query_params.get("error", "")},
     )
@@ -440,6 +445,7 @@ def student_dashboard(request: Request, db: DbSession):
         "passed": sum(1 for x in rows if x.status == "PASSED"),
     }
     return templates.TemplateResponse(
+        request,
         "student_dashboard.html",
         {"request": request, "student": s, "rows": rows, "counts": counts},
     )
@@ -448,13 +454,16 @@ def student_dashboard(request: Request, db: DbSession):
 @router.get("/student/profile", response_class=HTMLResponse)
 def student_profile(request: Request, db: DbSession):
     s = require_student(request, db)
-    return templates.TemplateResponse("student_profile.html", {"request": request, "student": s})
+    return templates.TemplateResponse(
+        request, "student_profile.html", {"request": request, "student": s}
+    )
 
 
 # ---------- admin auth ----------
 @router.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(request: Request):
     return templates.TemplateResponse(
+        request,
         "admin_login.html",
         {"request": request, "error": request.query_params.get("error", "")},
     )
@@ -513,7 +522,7 @@ def admin_dashboard(request: Request, db: DbSession):
             "queue": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
         }
     return templates.TemplateResponse(
-        "admin_dashboard.html", {"request": request, "admin": u, "metrics": metrics}
+        request, "admin_dashboard.html", {"request": request, "admin": u, "metrics": metrics}
     )
 
 
@@ -522,6 +531,7 @@ def admin_dashboard(request: Request, db: DbSession):
 def super_structure(request: Request, db: DbSession):
     u = require_super(request, db)
     return templates.TemplateResponse(
+        request,
         "super_structure.html",
         {
             "request": request,
@@ -599,6 +609,7 @@ def add_department(
 def admin_accounts(request: Request, db: DbSession):
     u = require_super(request, db)
     return templates.TemplateResponse(
+        request,
         "super_admins.html",
         {
             "request": request,
@@ -651,6 +662,7 @@ def super_ai(request: Request, db: DbSession):
     status = ai_health(get_settings().ai_service_url)
     profiles = db.query(AIProfile).all()
     return templates.TemplateResponse(
+        request,
         "super_ai.html",
         {"request": request, "admin": u, "status": status, "profiles": profiles},
     )
@@ -663,6 +675,7 @@ def unit_program_page(request: Request, db: DbSession):
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
     return templates.TemplateResponse(
+        request,
         "unit_programs.html",
         {
             "request": request,
@@ -703,6 +716,7 @@ def unit_supervisors(request: Request, db: DbSession):
     if u.role == "SUPER_ADMIN":
         raise HTTPException(403)
     return templates.TemplateResponse(
+        request,
         "unit_supervisors.html",
         {
             "request": request,
@@ -754,6 +768,7 @@ def unit_configuration(request: Request, db: DbSession):
     ids = [p.id for p in programs]
     configs = db.query(Template).filter(Template.program_id.in_(ids)).all() if ids else []
     return templates.TemplateResponse(
+        request,
         "unit_configuration.html",
         {
             "request": request,
@@ -890,6 +905,7 @@ def template_version_page(version_id: int, request: Request, db: DbSession):
         parsed_profile = {}
     parsed_profile = _normalize_profile_severities(parsed_profile)
     return templates.TemplateResponse(
+        request,
         "template_version.html",
         {
             "request": request,
@@ -1365,7 +1381,7 @@ def unit_submissions(request: Request, db: DbSession):
     )
     rows = q.order_by(Submission.created_at.desc()).all()
     return templates.TemplateResponse(
-        "unit_submissions.html", {"request": request, "admin": u, "rows": rows}
+        request, "unit_submissions.html", {"request": request, "admin": u, "rows": rows}
     )
 
 
@@ -1382,7 +1398,7 @@ def unit_queue(request: Request, db: DbSession):
     )
     jobs = jobs.order_by(AIJob.created_at.desc()).all()
     return templates.TemplateResponse(
-        "unit_queue.html", {"request": request, "admin": u, "jobs": jobs}
+        request, "unit_queue.html", {"request": request, "admin": u, "jobs": jobs}
     )
 
 
@@ -1431,6 +1447,7 @@ def student_options(program_id: int, request: Request, db: DbSession):
 def submit_form(request: Request, db: DbSession):
     s = require_student(request, db)
     return templates.TemplateResponse(
+        request,
         "submit.html",
         {"request": request, "student": s, "programs": unit_programs(db, s)},
     )
@@ -1571,6 +1588,7 @@ def view_submission(submission_id: int, request: Request, db: DbSession):
         for v in sorted(sub.versions, key=lambda x: x.version_no, reverse=True)
     ]
     return templates.TemplateResponse(
+        request,
         "submission.html",
         {
             "request": request,
@@ -1629,6 +1647,7 @@ def view_validation_report(submission_id: int, version_id: int, request: Request
         **stats,
     }
     return templates.TemplateResponse(
+        request,
         "validation_report.html",
         {
             "request": request,
