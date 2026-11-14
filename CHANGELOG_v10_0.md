@@ -29,8 +29,8 @@ same steps in order.
 
 ## Layout and dependencies (P1.1, P1.2)
 
-- `app/` → `services/core/src/unisubmit/`, `ai_service/` →
-  `services/ai/src/unisubmit_ai/`, tests beside each service.
+- `app/` → `services/core/unisubmit/`, `ai_service/` →
+  `services/ai/unisubmit_ai/`, tests beside each service.
 - One `uv.lock` for both services on Python 3.13. The web app moves from
   FastAPI 0.115 / Starlette 0.46 / SQLAlchemy 2.0 to FastAPI 0.162 /
   Starlette 1.10 / SQLAlchemy 2.1.

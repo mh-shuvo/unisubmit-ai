@@ -31,3 +31,7 @@ explicit = true
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# The package sits beside pyproject.toml; tests and tooling stay out of the wheel.
+[tool.hatch.build.targets.wheel]
+packages = ["unisubmit_ai"]

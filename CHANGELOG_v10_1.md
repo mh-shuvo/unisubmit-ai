@@ -18,6 +18,11 @@ pull request #3).
   `/u/<short name>/guidelines`. The old URLs redirect to the only university,
   or to the list on the home page when there are several.
 
+## Layout
+
+- The `src/` layer is gone: the packages are `services/core/unisubmit/` and
+  `services/ai/unisubmit_ai/`. Imports are unchanged.
+
 ## Tenancy (P2.1–P2.4, P2.6)
 
 - New `universities` table. `university_id` on faculties, institutes,

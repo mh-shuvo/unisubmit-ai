@@ -15,7 +15,7 @@ repos:
         types_or: [python, pyi]
       - id: mypy
         name: mypy
-        entry: uv run mypy services/core/src services/ai/src
+        entry: uv run mypy services/core/unisubmit services/ai/unisubmit_ai
         language: system
         types: [python]
         pass_filenames: false

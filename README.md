@@ -56,8 +56,8 @@ put back in the queue.
 
 | Path | What |
 |---|---|
-| `services/core/src/unisubmit/` | Web app (`main.py`), queue worker, `unisubmit` CLI, migrations |
-| `services/ai/src/unisubmit_ai/` | AI service: guideline parsing, RAG indexing, semantic validation |
+| `services/core/unisubmit/` | Web app (`main.py`), queue worker, `unisubmit` CLI, migrations |
+| `services/ai/unisubmit_ai/` | AI service: guideline parsing, RAG indexing, semantic validation |
 | `services/*/tests/` | Test suites; the core's `integration/` tests need PostgreSQL |
 | `pyproject.toml`, `uv.lock` | One uv workspace for both services, Python 3.13 |
 | `compose.yaml` | PostgreSQL, Qdrant, migrations, web app, worker; AI service under profile `ai` |
@@ -153,7 +153,7 @@ CI runs these on every pull request; run them before pushing:
 
 ```bash
 uv run ruff format --check . && uv run ruff check .
-uv run mypy services/core/src services/ai/src
+uv run mypy services/core/unisubmit services/ai/unisubmit_ai
 uv run lint-imports
 TEST_DATABASE_URL=postgresql+psycopg://unisubmit:PASSWORD@127.0.0.1:5433/unisubmit_test uv run pytest
 ```
