@@ -18,7 +18,7 @@ constraint-dependencies = [
 members = ["services/core", "services/ai"]
 
 [dependency-groups]
-dev = ["pytest>=9.2", "ruff>=0.17.5", "mypy>=2.4"]
+dev = ["pytest>=9.2", "ruff>=0.17.5", "mypy>=2.4", "import-linter>=2.16", "pre-commit>=4.7"]
 
 [tool.ruff]
 line-length = 100
@@ -94,3 +94,21 @@ addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importli
 testpaths = ["services/core/tests", "services/ai/tests"]
 # Test helpers (`factories`, `support`) are imported by name.
 pythonpath = ["services/core/tests"]
+
+[tool.importlinter]
+root_packages = ["unisubmit", "unisubmit_ai"]
+
+[[tool.importlinter.contracts]]
+name = "The web app and the AI service talk over HTTP only"
+type = "independence"
+modules = ["unisubmit", "unisubmit_ai"]
+
+[[tool.importlinter.contracts]]
+name = "Core layers: entry points, then pages, then models, then core"
+type = "layers"
+layers = [
+  "unisubmit.cli : unisubmit.worker",
+  "unisubmit.main : unisubmit.seed",
+  "unisubmit.models",
+  "unisubmit.core",
+]
