@@ -1,0 +1,115 @@
+[project]
+name = "unisubmit-workspace"
+version = "0"
+requires-python = ">=3.13,<3.14"
+
+[tool.uv]
+package = false
+# The embedding stack the existing Qdrant index was built with. Upgrade
+# deliberately and re-index, never as a side effect of `uv lock`.
+constraint-dependencies = [
+  "torch==2.14.1",
+  "transformers==5.20.1",
+  "sentence-transformers==6.1.0",
+  "peft==0.21.2",
+]
+
+[tool.uv.workspace]
+members = ["services/core", "services/ai"]
+
+[dependency-groups]
+dev = ["pytest>=9.2", "ruff>=0.17.5", "mypy>=2.4", "import-linter>=2.16", "pre-commit>=4.7"]
+
+[tool.ruff]
+line-length = 100
+src = ["services/core", "services/ai", "services/core/tests", "services/ai/tests"]
+# Code in Markdown is illustrative (defect entries quote the code as it was).
+extend-exclude = ["*.md"]
+target-version = "py313"
+
+[tool.ruff.lint]
+# ASYNC: blocking calls in async code; DTZ: naive datetimes; S: security; PTH: pathlib
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "S", "ASYNC", "DTZ", "PTH", "RUF", "PL"]
+ignore = ["PLR0913"]  # FastAPI endpoints legitimately take many parameters
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares parameters through these calls in default arguments.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "RUF059", "DTZ003", "SIM117", "ASYNC110"]
+# Legacy baseline (P1.3): the rules each module broke when Ruff was introduced.
+# Entries shrink as modules are split (Phases 5 and 6); new modules get none.
+"services/ai/unisubmit_ai/main.py" = ["ASYNC240", "B904", "B905", "E501", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW0603", "PLW2901", "PTH107", "PTH108", "PTH110", "RUF001", "S110", "SIM105"]
+"services/core/unisubmit/ai.py" = ["E501"]
+"services/core/unisubmit/ai_service_client.py" = ["ASYNC230", "PTH123"]
+"services/core/unisubmit/config.py" = ["PLR2004"]
+"services/core/unisubmit/format_validation.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR0917", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
+"services/core/unisubmit/main.py" = ["B904", "DTZ003", "E402", "E501", "E712", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW2901", "RUF059", "S110", "SIM105"]
+"services/core/unisubmit/pdf_utils.py" = ["B904", "B905", "PLR0912", "PLR0915", "PLR2004", "RUF007"]
+"services/core/unisubmit/report_parser.py" = ["E501", "PLW2901"]
+"services/core/unisubmit/reporting.py" = ["E501", "PLR0912", "PLR0915"]
+"services/core/unisubmit/seed.py" = ["PLC0415"]
+"services/core/unisubmit/validators.py" = ["E501", "PLR0911", "PLR0912", "PLR2004", "RUF001"]
+"services/core/unisubmit/worker.py" = ["DTZ003", "SIM105"]
+"tools/model_verification/verify_model_integrity.py" = ["B007", "E501", "PTH123", "RUF002", "S105", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = ["services/core", "services/ai"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["fitz.*", "pymupdf.*", "reportlab.*", "FlagEmbedding.*"]
+ignore_missing_imports = true
+
+# Legacy baseline (P1.4): modules moved unchanged in P1.2 are not type-checked
+# yet (about 100 errors, mostly inference on untyped dicts and Starlette's old
+# TemplateResponse(name, context) form). New modules are strict; a module
+# leaves this list when it is typed, at the latest when it is split in
+# Phases 5 and 6.
+[[tool.mypy.overrides]]
+module = [
+  "unisubmit.ai",
+  "unisubmit.ai_service_client",
+  "unisubmit.config",
+  "unisubmit.db",
+  "unisubmit.emailer",
+  "unisubmit.format_validation",
+  "unisubmit.main",
+  "unisubmit.models",
+  "unisubmit.pdf_utils",
+  "unisubmit.report_parser",
+  "unisubmit.reporting",
+  "unisubmit.validators",
+  "unisubmit.worker",
+  "unisubmit_ai.main",
+]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+testpaths = ["services/core/tests", "services/ai/tests"]
+# Test helpers (`factories`, `support`) are imported by name.
+pythonpath = ["services/core/tests"]
+
+[tool.importlinter]
+root_packages = ["unisubmit", "unisubmit_ai"]
+
+[[tool.importlinter.contracts]]
+name = "The web app and the AI service talk over HTTP only"
+type = "independence"
+modules = ["unisubmit", "unisubmit_ai"]
+
+[[tool.importlinter.contracts]]
+name = "Core layers: entry points, pages, tenancy and storage, models, core"
+type = "layers"
+layers = [
+  "unisubmit.cli : unisubmit.worker",
+  "unisubmit.main : unisubmit.seed",
+  "unisubmit.tenancy : unisubmit.queries : unisubmit.storage",
+  "unisubmit.models",
+  "unisubmit.core",
+]

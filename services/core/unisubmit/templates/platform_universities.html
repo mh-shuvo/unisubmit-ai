@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% block title %}Universities · UniSubmit AI{% endblock %}{% block content %}<div class="dashboard-shell">{% include '_admin_nav.html' %}<main class="dashboard-main"><div class="page-head"><div><span class="eyebrow">Platform</span><h1>Universities</h1><p>Each university is a separate tenant: its units, guidelines, accounts and files are invisible to the others. Deactivating one signs out all its users.</p></div></div>{% include '_messages.html' %}
+<section class="panel"><h2>Create a university and its first admin</h2><form method="post" action="/platform/universities" class="form-grid cols-2">
+<label>University name<input name="name" required maxlength="200"></label>
+<label>Short name (URL)<input name="slug" required maxlength="60" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="e.g. dhaka-university"></label>
+<label>University Admin name<input name="admin_name" required></label>
+<label>University Admin email<input name="admin_email" type="email" required></label>
+<label>University Admin password<input name="admin_password" type="password" minlength="12" required></label>
+<button class="btn">Create university</button></form></section>
+<section class="panel"><h2>All universities</h2><div class="card-list">{% for u in universities %}<div class="list-card"><div class="row-between"><b>{{u.name}}</b><span class="badge {{'passed' if u.is_active else 'failed'}}">{{'Active' if u.is_active else 'Deactivated'}}</span></div><small>/u/{{u.slug}}/</small>
+<form method="post" action="/platform/universities/{{u.id}}/rename" class="form-grid cols-2"><label>Name<input name="name" value="{{u.name}}" required maxlength="200"></label><label>Short name<input name="slug" value="{{u.slug}}" required maxlength="60"></label><button class="btn small secondary">Rename</button></form>
+<form method="post" action="/platform/universities/{{u.id}}/active"><input type="hidden" name="active" value="{{'false' if u.is_active else 'true'}}"><button class="btn small {{'secondary' if u.is_active else ''}}">{{'Deactivate' if u.is_active else 'Activate'}}</button></form></div>{% else %}<p>No universities yet.</p>{% endfor %}</div></section></main></div>{% endblock %}

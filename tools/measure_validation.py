@@ -2,15 +2,16 @@
 
     python tools/measure_validation.py --template-version 1 --pdf path/to/thesis.pdf
 
-Reads the template version from DATABASE_URL (read only), runs the
+Reads the template version from UNISUBMIT_DATABASE_URL (read only), runs the
 deterministic checks in this process and the semantic check through the AI
-service at AI_SERVICE_URL, exactly as the worker would, and prints the time of
+service at UNISUBMIT_AI_SERVICE_URL, exactly as the worker would, and prints the time of
 each stage as JSON. It writes nothing to the database, the queue or storage,
 so it can run beside a live stack. Ollama is shared, though: do not run it
 while the worker is validating (LIM-003).
 
 Restructuring plan task P0.11: the measured time sets RAG_VALIDATE_TIMEOUT.
 """
+
 import argparse
 import asyncio
 import json
@@ -19,16 +20,14 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from app.ai_service_client import health, rag_validate  # noqa: E402
-from app.config import settings  # noqa: E402
-from app.db import SessionLocal  # noqa: E402
-from app.format_validation import validate_all_profile_rules  # noqa: E402
-from app.main import _normalize_profile_severities, semantic_validation_payload  # noqa: E402
-from app.models import TemplateVersion  # noqa: E402
-from app.pdf_utils import inspect_pdf  # noqa: E402
-from app.validators import run_rules  # noqa: E402
+from unisubmit.ai_service_client import health, rag_validate
+from unisubmit.core.config import get_settings
+from unisubmit.core.db import create_db_engine, make_session_factory
+from unisubmit.format_validation import validate_all_profile_rules
+from unisubmit.main import _normalize_profile_severities, semantic_validation_payload
+from unisubmit.models import TemplateVersion
+from unisubmit.pdf_utils import inspect_pdf
+from unisubmit.validators import run_rules
 
 
 def timed(fn, *args):
@@ -44,14 +43,18 @@ def main() -> int:
     parser.add_argument("--model", help="override the AI profile's base model")
     args = parser.parse_args()
 
-    with SessionLocal() as db:
+    settings = get_settings()
+    with make_session_factory(create_db_engine(str(settings.database_url)))() as db:
         tv = db.get(TemplateVersion, args.template_version)
         if tv is None:
             print(f"Template version {args.template_version} not found.", file=sys.stderr)
             return 1
         profile = next(
-            (p for p in tv.template.program.ai_profiles
-             if p.submission_type == tv.template.submission_type),
+            (
+                p
+                for p in tv.template.program.ai_profiles
+                if p.submission_type == tv.template.submission_type
+            ),
             None,
         )
         model = args.model or (profile.base_model if profile else settings.ollama_model)
@@ -61,7 +64,9 @@ def main() -> int:
         started = time.perf_counter()
         run_rules(tv.rules, info)
         format_results = (
-            validate_all_profile_rules(fmt_profile, info) if tv.format_profile_status == "Active" else []
+            validate_all_profile_rules(fmt_profile, info)
+            if tv.format_profile_status == "Active"
+            else []
         )
         deterministic_s = round(time.perf_counter() - started, 2)
         payload = semantic_validation_payload(
@@ -73,23 +78,30 @@ def main() -> int:
     ai = asyncio.run(rag_validate(settings.ai_service_url, payload))
     semantic_s = round(time.perf_counter() - started, 2)
 
-    print(json.dumps({
-        "machine": f"{platform.system()} {platform.machine()}",
-        "model": model,
-        "embedding_device": ((service.get("data") or {}).get("embedding") or {}).get("device"),
-        "pdf": args.pdf.name,
-        "pages": info.get("page_count"),
-        "deterministic_rules": len(format_results) + len(tv.rules),
-        "semantic_requirements": len(payload["explicit_requirements"]),
-        "semantic_batches": ai.get("semantic_batches"),
-        "semantic_batches_failed": ai.get("semantic_batches_failed"),
-        "seconds": {
-            "inspect_pdf": inspect_s,
-            "deterministic": deterministic_s,
-            "semantic_ai": semantic_s,
-            "total": round(inspect_s + deterministic_s + semantic_s, 2),
-        },
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "machine": f"{platform.system()} {platform.machine()}",
+                "model": model,
+                "embedding_device": ((service.get("data") or {}).get("embedding") or {}).get(
+                    "device"
+                ),
+                "pdf": args.pdf.name,
+                "pages": info.get("page_count"),
+                "deterministic_rules": len(format_results) + len(tv.rules),
+                "semantic_requirements": len(payload["explicit_requirements"]),
+                "semantic_batches": ai.get("semantic_batches"),
+                "semantic_batches_failed": ai.get("semantic_batches_failed"),
+                "seconds": {
+                    "inspect_pdf": inspect_s,
+                    "deterministic": deterministic_s,
+                    "semantic_ai": semantic_s,
+                    "total": round(inspect_s + deterministic_s + semantic_s, 2),
+                },
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
