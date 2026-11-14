@@ -1552,8 +1552,9 @@ def save_queue_version(sub, pdf, db):
     )
     db.add(sv)
     sub.status = "QUEUED"
-    db.commit()
-    db.refresh(sv)
+    db.flush()
+    # One commit: committing the version first released the lock before its
+    # job existed, and a second upload in that gap saw no active job (DEF-046).
     db.add(AIJob(submission_version_id=sv.id, status="QUEUED"))
     db.commit()
     return sv
