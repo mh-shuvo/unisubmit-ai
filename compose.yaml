@@ -1,4 +1,4 @@
-# UniSubmit stack: web app + queue worker + Qdrant + Postgres in Docker.
+# UniSubmit stack: Postgres, Qdrant, migrations, web app and queue worker.
 #
 #   docker compose up -d --build                 # Mac demo: AI service runs natively
 #   docker compose --profile ai up -d --build    # AI service in Docker too (CPU only)
@@ -8,45 +8,66 @@
 # (see docs/runbook-demo-mac.md). On a Linux host, use the `ai` profile and set
 # DOCKER_AI_SERVICE_URL=http://ai-service:8001.
 #
+# The web app and worker stay in Docker on the Mac too: rows written by the
+# containers hold /app/storage paths (DEF-042), so they must keep running where
+# those paths exist.
+#
 # Every published port is bound to 127.0.0.1, so nothing is reachable from
 # another machine (DEF-030). Secrets have no defaults: compose refuses to start
 # until they are set in .env (DEF-027, DEF-030).
 
-x-app: &app
+x-core: &core
   build: { context: ., dockerfile: services/core/Dockerfile }
+  image: unisubmit-core:10
   volumes:
     # Named volume so it works regardless of Docker Desktop file-sharing
     # settings. Swap for `./storage:/app/storage` to browse uploads on the
     # host (the project path must then be shared with Docker Desktop).
     - app_storage:/app/storage
   environment:
-    APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env (openssl rand -hex 32)}
-    AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env (openssl rand -hex 32)}
-    DATABASE_URL: postgresql://unisubmit:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/unisubmit
-    AI_SERVICE_URL: ${DOCKER_AI_SERVICE_URL:-http://host.docker.internal:8001}
-    OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://host.docker.internal:11434}
-    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+    UNISUBMIT_SECRET_KEY: ${UNISUBMIT_SECRET_KEY:?Set UNISUBMIT_SECRET_KEY in .env (openssl rand -hex 32)}
+    UNISUBMIT_AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env (openssl rand -hex 32)}
+    UNISUBMIT_DATABASE_URL: postgresql+psycopg://unisubmit:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/unisubmit
+    UNISUBMIT_STORAGE_DIR: /app/storage
+    UNISUBMIT_AI_SERVICE_URL: ${DOCKER_AI_SERVICE_URL:-http://host.docker.internal:8001}
+    UNISUBMIT_OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://host.docker.internal:11434}
+    UNISUBMIT_OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
     RAG_VALIDATE_TIMEOUT: ${RAG_VALIDATE_TIMEOUT:-1800}
   extra_hosts:
     - "host.docker.internal:host-gateway"
   # A worker that exits silently stops every validation; bring it back.
   restart: unless-stopped
-  depends_on:
-    db:
-      condition: service_healthy
 
 services:
+  # Brings the schema up to date before the app and worker start; neither
+  # creates tables itself (DEF-039, DEF-045). Runs as root once, to hand a
+  # storage volume written by the root-run v9 containers to the `app` user.
+  migrate:
+    <<: *core
+    user: root
+    command: ["sh", "-c", "chown -R app:app /app/storage && exec unisubmit migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
-    <<: *app
+    <<: *core
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   # Validation jobs run here, one at a time, never in the web process (DEF-024).
   worker:
-    <<: *app
+    <<: *core
     command: ["python", "-m", "unisubmit.worker"]
     # Lets an interrupted job be put back in the queue before the stop (DEF-034).
     stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   ai-service:
     profiles: ["ai"]

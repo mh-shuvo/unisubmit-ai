@@ -2,7 +2,10 @@
 # On Linux, uv takes torch from the CPU-only index (services/ai/pyproject.toml).
 FROM python:3.13-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /bin/uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# The venv is built where it runs: console scripts (uvicorn) carry
+# its absolute path in their shebang.
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /src
 COPY pyproject.toml uv.lock ./
 COPY services/core/pyproject.toml services/core/
@@ -14,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package unisubmit-ai --no-editable
 
 FROM python:3.13-slim
-COPY --from=build /src/.venv /app/.venv
+COPY --from=build /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 WORKDIR /app
 # BAAI/bge-m3 (~2 GB) is downloaded here on first start; the compose file
