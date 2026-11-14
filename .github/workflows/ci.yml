@@ -21,7 +21,8 @@ jobs:
       UNISUBMIT_AI_SERVICE_TOKEN: ci-only-token-not-used-anywhere-else-000000000
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes exact versions only; there is no floating v10 tag.
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
       - run: uv sync --frozen --all-packages
