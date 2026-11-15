@@ -4,10 +4,13 @@ A University Admin sees one university; a unit admin and a student see one
 department or institute, which itself belongs to one university.
 """
 
-from sqlalchemy import ColumnElement, func, or_, select
-from sqlalchemy.orm import Session
+from dataclasses import dataclass
+
+from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from .models import (
+    IN_PROGRESS,
     AdminRole,
     AdminUser,
     Department,
@@ -116,30 +119,77 @@ def unit_teachers(db: Session, user: AdminUser | StudentUser) -> list[Teacher]:
     )
 
 
-def unit_submissions(db: Session, admin: AdminUser) -> list[Submission]:
+PAGE_ROWS = 100  # the most rows any list page shows at once (P5.8)
+
+
+@dataclass(frozen=True, slots=True)
+class Page[T]:
+    rows: list[T]
+    number: int
+    has_next: bool
+
+
+def _page[T](rows: list[T], number: int) -> Page[T]:
+    """`rows` holds one row more than a page when there is a next page."""
+    return Page(rows[:PAGE_ROWS], number, len(rows) > PAGE_ROWS)
+
+
+def _offset(number: int) -> int:
+    return (max(number, 1) - 1) * PAGE_ROWS
+
+
+def _unit_submissions_query(admin: AdminUser) -> Select[Submission] | None:
     unit = _in_unit(Program, admin)
     if unit is None:
-        return []
-    return list(
-        db.scalars(
-            select(Submission)
-            .join(Program, Submission.program_id == Program.id)
-            .where(unit, Submission.university_id == admin.university_id)
-            .order_by(Submission.created_at.desc())
-        )
+        return None
+    return (
+        select(Submission)
+        .join(Program, Submission.program_id == Program.id)
+        .where(unit, Submission.university_id == admin.university_id)
     )
 
 
-QUEUE_PAGE_ROWS = 200
+def unit_submissions(db: Session, admin: AdminUser, page: int = 1) -> Page[Submission]:
+    """One page of the unit's submissions, newest first, with everything the
+    list shows loaded up front: the query count does not grow with the rows."""
+    query = _unit_submissions_query(admin)
+    if query is None:
+        return Page([], 1, False)
+    rows = db.scalars(
+        query.options(
+            selectinload(Submission.student),
+            selectinload(Submission.program),
+            selectinload(Submission.teacher),
+            selectinload(Submission.template_version).selectinload(TemplateVersion.template),
+        )
+        .order_by(Submission.created_at.desc(), Submission.id.desc())
+        .limit(PAGE_ROWS + 1)
+        .offset(_offset(page))
+    )
+    return _page(list(rows), max(page, 1))
+
+
+def unit_submission_counts(db: Session, admin: AdminUser) -> tuple[int, int]:
+    """All of the unit's submissions, and those still queued or validating."""
+    query = _unit_submissions_query(admin)
+    if query is None:
+        return 0, 0
+    counted = query.with_only_columns(
+        func.count(Submission.id),
+        func.count(Submission.id).filter(Submission.status.in_(IN_PROGRESS)),
+    )
+    total, in_progress = db.execute(counted).one()
+    return total, in_progress
 
 
 def unit_jobs(
-    db: Session, admin: AdminUser
-) -> list[tuple[Job, SubmissionVersion | None, TemplateVersion | None]]:
-    """The unit's latest jobs, each with the submission version or guideline it works on."""
+    db: Session, admin: AdminUser, page: int = 1
+) -> Page[tuple[Job, SubmissionVersion | None, TemplateVersion | None]]:
+    """One page of the unit's jobs, newest first, each with the submission
+    version or guideline it works on and what the queue page shows of them."""
     unit = _in_unit(Program, admin)
     if unit is None:
-        return []
+        return Page([], 1, False)
     rows = db.execute(
         select(Job, SubmissionVersion, TemplateVersion)
         .outerjoin(
@@ -153,7 +203,13 @@ def unit_jobs(
         .outerjoin(Template, Template.id == TemplateVersion.template_id)
         .join(Program, Program.id == func.coalesce(Submission.program_id, Template.program_id))
         .where(unit, Job.university_id == admin.university_id)
+        .options(
+            selectinload(SubmissionVersion.submission).selectinload(Submission.student),
+            selectinload(SubmissionVersion.submission).selectinload(Submission.program),
+            selectinload(TemplateVersion.template).selectinload(Template.program),
+        )
         .order_by(Job.id.desc())
-        .limit(QUEUE_PAGE_ROWS)
+        .limit(PAGE_ROWS + 1)
+        .offset(_offset(page))
     )
-    return [(job, version, guideline) for job, version, guideline in rows]
+    return _page([(job, version, guideline) for job, version, guideline in rows], max(page, 1))

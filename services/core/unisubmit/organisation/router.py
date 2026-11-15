@@ -14,10 +14,9 @@ from ..auth.dependencies import (
     require_role,
 )
 from ..core.db import DbSession
-from ..core.security import hash_password, verify_csrf
+from ..core.security import MIN_ADMIN_PASSWORD, hash_password, verify_csrf
 from ..core.templating import flash_url, templates
 from ..models import AdminRole, AdminUser, Department, Faculty, Institute, Program, Teacher
-from ..tenancy import service as tenancy
 
 router = APIRouter(dependencies=[Depends(verify_csrf)])
 
@@ -154,8 +153,8 @@ def create_unit_admin(
     )
     if unit_id not in {unit.id for unit in units}:
         raise HTTPException(404)
-    if len(password) < tenancy.MIN_ADMIN_PASSWORD:
-        error = f"The password must be at least {tenancy.MIN_ADMIN_PASSWORD} characters"
+    if len(password) < MIN_ADMIN_PASSWORD:
+        error = f"The password must be at least {MIN_ADMIN_PASSWORD} characters"
         return RedirectResponse(flash_url("/admin/admins", error=error), 303)
     unit_admin = AdminUser(
         name=name.strip(),

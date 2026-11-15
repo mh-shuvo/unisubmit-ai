@@ -32,10 +32,7 @@ from ..models import (
     TemplateVersion,
     ValidationRule,
 )
-from ..submissions.service import (
-    UploadRefused,
-    store_pdf,
-)
+from ..storage import UploadRefused, store_pdf
 from ..tenancy.dependencies import to_university_page, university_page
 
 router = APIRouter(dependencies=[Depends(verify_csrf)])

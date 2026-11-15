@@ -20,6 +20,7 @@ from starlette.requests import Request
 
 from .errors import PermissionDenied
 
+MIN_ADMIN_PASSWORD = 12
 MAX_FAILED_LOGINS = 10
 LOCKOUT = timedelta(minutes=15)
 CSRF_FIELD = "csrf_token"

@@ -1,0 +1,1 @@
+{% if page.number > 1 or page.has_next %}<div class="actions">{% if page.number > 1 %}<a class="btn small secondary" href="?page={{page.number - 1}}">← Newer</a>{% endif %}{% if page.has_next %}<a class="btn small secondary" href="?page={{page.number + 1}}">Older →</a>{% endif %}</div>{% endif %}

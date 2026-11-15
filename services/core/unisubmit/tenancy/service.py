@@ -10,10 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import audit
-from ..core.security import hash_password
+from ..core.security import MIN_ADMIN_PASSWORD, hash_password
 from ..models import AdminRole, AdminUser, University
 
-MIN_ADMIN_PASSWORD = 12
 MAX_SLUG = 60  # universities.slug
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 

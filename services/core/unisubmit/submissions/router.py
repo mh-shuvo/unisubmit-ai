@@ -31,13 +31,12 @@ from ..models import (
 )
 from ..report_parser import parse_ai_report
 from ..reporting import build_validation_report
+from ..storage import UploadRefused, store_pdf
 from ..submissions.service import (
-    UploadRefused,
     check_upload_caps,
     queue_version,
     report_run_token,
     save_queue_version,
-    store_pdf,
 )
 
 router = APIRouter(dependencies=[Depends(verify_csrf)])
@@ -334,10 +333,10 @@ def download_report_bound(
 
 
 @router.get("/admin/submissions", response_class=HTMLResponse)
-def unit_submissions(request: Request, db: DbSession) -> Response:
+def unit_submissions(request: Request, db: DbSession, page: int = 1) -> Response:
     u = require_role(request, db, AdminRole.UNIT_ADMIN)
     return templates.TemplateResponse(
         request,
         "unit_submissions.html",
-        {"request": request, "admin": u, "rows": queries.unit_submissions(db, u)},
+        {"request": request, "admin": u, "page": queries.unit_submissions(db, u, page)},
     )

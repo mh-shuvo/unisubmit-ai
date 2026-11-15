@@ -18,36 +18,13 @@ from ..models import (
     SubmissionStatus,
     SubmissionVersion,
 )
-from ..pdf_utils import PDFError, inspect_pdf
+from ..storage import UploadRefused, store_pdf
 
 
 def report_run_token(version: SubmissionVersion) -> str:
     """Names the report file and its download URL after the validation run."""
     raw = (version.ai_run_reference or "deterministic").strip() or "deterministic"
     return "".join(ch for ch in raw if ch.isalnum() or ch in ("-", "_"))[:80] or "deterministic"
-
-
-class UploadRefused(ValueError):
-    """An upload that was not accepted; the message is shown to the uploader."""
-
-
-def store_pdf(
-    source: IO[bytes], university_id: int, kind: storage.Kind, prefix: str
-) -> tuple[storage.StoredFile, dict[str, Any]]:
-    """Store an upload and read it; returns (StoredFile, inspect_pdf info).
-
-    Rejects files that are not PDFs, too large, encrypted or unreadable, and
-    leaves no file behind when it does (P3.8).
-    """
-    try:
-        stored = storage.save_pdf(source, university_id, kind, prefix)
-    except storage.UploadRejected as e:
-        raise UploadRefused(str(e)) from None
-    try:
-        return stored, inspect_pdf(str(storage.resolve(stored.relative_path)))
-    except PDFError as e:
-        storage.delete(stored.relative_path)
-        raise UploadRefused(str(e)) from None
 
 
 def check_upload_caps(db: Session, student: StudentUser) -> None:

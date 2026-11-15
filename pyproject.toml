@@ -87,13 +87,22 @@ type = "independence"
 modules = ["unisubmit", "unisubmit_ai"]
 
 [[tool.importlinter.contracts]]
-name = "Core layers: entry points, pages, tenancy and storage, models, core"
+# P5.7: higher layers may import lower ones, never the reverse. Tenancy sits
+# above auth: the university comes from the signed-in user (P2.6).
+name = "Core layers: entry points, pages, features, integrations, models, core"
 type = "layers"
 layers = [
   "unisubmit.cli : unisubmit.worker",
-  "unisubmit.handlers",
-  "unisubmit.main : unisubmit.seed",
-  "unisubmit.tenancy : unisubmit.queries : unisubmit.storage : unisubmit.queue",
-  "unisubmit.audit",
+  "unisubmit.main",
+  "unisubmit.portal : unisubmit.system : unisubmit.handlers : unisubmit.seed",
+  "unisubmit.submissions",
+  "unisubmit.validation",
+  "unisubmit.guidelines",
+  "unisubmit.organisation",
+  "unisubmit.tenancy",
+  "unisubmit.auth",
+  "unisubmit.queries : unisubmit.queue : unisubmit.storage : unisubmit.audit : unisubmit.reporting : unisubmit.validators : unisubmit.emailer : unisubmit.ai_service_client : unisubmit.ai",
+  "unisubmit.pdf_utils : unisubmit.report_parser",
+  "unisubmit.models",
   "unisubmit.core",
 ]

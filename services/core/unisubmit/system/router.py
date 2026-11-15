@@ -37,12 +37,12 @@ def super_ai(request: Request, db: DbSession) -> Response:
 
 
 @router.get("/admin/queue", response_class=HTMLResponse)
-def unit_queue(request: Request, db: DbSession) -> Response:
+def unit_queue(request: Request, db: DbSession, page: int = 1) -> Response:
     u = require_role(request, db, AdminRole.UNIT_ADMIN)
     return templates.TemplateResponse(
         request,
         "unit_queue.html",
-        {"request": request, "admin": u, "rows": queries.unit_jobs(db, u)},
+        {"request": request, "admin": u, "page": queries.unit_jobs(db, u, page)},
     )
 
 

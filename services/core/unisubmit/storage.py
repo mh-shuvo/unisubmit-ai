@@ -12,9 +12,10 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Literal
+from typing import IO, Any, Literal
 
 from .core.config import get_settings
+from .pdf_utils import PDFError, inspect_pdf
 
 Kind = Literal["guidelines", "submissions", "reports"]
 MB = 1024 * 1024
@@ -113,3 +114,26 @@ def delete(stored: str) -> None:
     """Remove a stored file; a missing file or a path outside the root is ignored."""
     with contextlib.suppress(FileNotFoundError):
         resolve(stored).unlink(missing_ok=True)
+
+
+class UploadRefused(ValueError):
+    """An upload that was not accepted; the message is shown to the uploader."""
+
+
+def store_pdf(
+    source: IO[bytes], university_id: int, kind: Kind, prefix: str
+) -> tuple[StoredFile, dict[str, Any]]:
+    """Store an upload and read it; returns (StoredFile, inspect_pdf info).
+
+    Rejects files that are not PDFs, too large, encrypted or unreadable, and
+    leaves no file behind when it does (P3.8).
+    """
+    try:
+        stored = save_pdf(source, university_id, kind, prefix)
+    except UploadRejected as e:
+        raise UploadRefused(str(e)) from None
+    try:
+        return stored, inspect_pdf(str(resolve(stored.relative_path)))
+    except PDFError as e:
+        delete(stored.relative_path)
+        raise UploadRefused(str(e)) from None

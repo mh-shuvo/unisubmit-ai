@@ -137,7 +137,7 @@ class SubmissionTests(TwoUniversities):
     def test_unit_admin_sees_only_its_own_universitys_submissions(self):
         with self.Session() as db:
             admin = db.get(AdminUser, self.other.admin_id)
-            ids = [submission.id for submission in queries.unit_submissions(db, admin)]
+            ids = [submission.id for submission in queries.unit_submissions(db, admin).rows]
         self.assertEqual(ids, [self.other.submission_id])
 
     def test_unit_admin_sees_only_its_own_universitys_queue(self):
@@ -145,7 +145,7 @@ class SubmissionTests(TwoUniversities):
             add_version(db, self.world.submission_id, self.tmp, JobStatus.QUEUED)
             mine = add_version(db, self.other.submission_id, self.tmp, JobStatus.QUEUED)
             admin = db.get(AdminUser, self.other.admin_id)
-            ids = [job.id for job, _, _ in queries.unit_jobs(db, admin)]
+            ids = [job.id for job, _, _ in queries.unit_jobs(db, admin).rows]
         self.assertEqual(ids, [mine])
 
     def test_student_cannot_choose_another_universitys_supervisor(self):

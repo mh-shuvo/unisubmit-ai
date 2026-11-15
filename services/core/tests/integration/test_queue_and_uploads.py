@@ -40,7 +40,8 @@ from unisubmit.models import (
     SubmissionVersion,
     TemplateVersion,
 )
-from unisubmit.submissions.service import UploadRefused, save_queue_version
+from unisubmit.storage import UploadRefused
+from unisubmit.submissions.service import save_queue_version
 
 
 class WebProcessTests(AppTestCase):
