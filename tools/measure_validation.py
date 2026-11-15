@@ -24,10 +24,10 @@ from pathlib import Path
 from unisubmit.ai_service_client import health, rag_validate
 from unisubmit.core.config import get_settings
 from unisubmit.core.db import create_db_engine, make_session_factory
-from unisubmit.format_validation import validate_all_profile_rules
 from unisubmit.guidelines.profile import normalize_profile_severities
 from unisubmit.models import TemplateVersion
 from unisubmit.pdf_utils import inspect_pdf
+from unisubmit.validation.rules.engine import validate_all_profile_rules
 from unisubmit.validation.semantic import semantic_validation_payload
 from unisubmit.validators import run_rules
 

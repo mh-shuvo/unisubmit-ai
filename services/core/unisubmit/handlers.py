@@ -25,7 +25,6 @@ from .ai_service_client import (
 )
 from .core.config import get_settings
 from .emailer import send_submission_email
-from .format_validation import validate_all_profile_rules
 from .guidelines.profile import normalize_profile_severities
 from .models import (
     AIProfile,
@@ -43,6 +42,7 @@ from .pdf_utils import hidden_text_result, inspect_pdf, visible_text
 from .queue import FollowUp, TransientError
 from .reporting import build_validation_report
 from .submissions.service import report_run_token
+from .validation.rules.engine import validate_all_profile_rules
 from .validation.semantic import profile_rule_stats, semantic_validation_payload
 from .validators import run_rules
 

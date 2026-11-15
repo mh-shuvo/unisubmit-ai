@@ -17,23 +17,25 @@ from .models import Submission, SubmissionVersion
 from .report_parser import parse_ai_report
 
 
-def _esc(text):
+def _esc(text: object) -> str:
     return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _p(text, style):
+def _p(text: object, style: ParagraphStyle) -> Paragraph:
     return Paragraph(_esc(text), style)
 
 
-def _page_label(page):
+def _page_label(page: object) -> str:
     return f"p.{page}" if page not in (None, "", "None") else "Document-level"
 
 
-def _source_label(r):
+def _source_label(r: dict[str, Any]) -> str:
     if r.get("source_type") == "Manual Semantic Rule":
         page = "Manual Semantic Rule"
     elif r.get("source_pages"):
-        pages = ", ".join(str(x) for x in r.get("source_pages") if x not in (None, "", "None"))
+        pages = ", ".join(
+            str(x) for x in (r.get("source_pages") or []) if x not in (None, "", "None")
+        )
         page = f"Pages {pages}" if pages else "Approved guideline"
     else:
         page = f"Page {r.get('source_page')}" if r.get("source_page") else "Approved guideline"

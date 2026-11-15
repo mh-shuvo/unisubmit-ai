@@ -26,20 +26,18 @@ from pathlib import Path
 
 import fitz
 
-from unisubmit.format_validation import (
-    _find_section,
-    _heading_candidates,
-    _is_body_text_line,
-    _is_generic_target,
-    _num_ok,
-    _parse_num,
-    _parse_num_op,
-    _span_is_bold,
-    _strip_qualifier,
-    _to_title_case,
-    validate_all_profile_rules,
-)
 from unisubmit.pdf_utils import inspect_pdf
+from unisubmit.validation.rules.engine import validate_all_profile_rules
+from unisubmit.validation.rules.layout import is_body_text_line
+from unisubmit.validation.rules.sections import find_section, heading_candidates
+from unisubmit.validation.rules.typography import span_is_bold, to_title_case
+from unisubmit.validation.rules.values import (
+    is_generic_target,
+    num_ok,
+    parse_num,
+    parse_num_op,
+    strip_qualifier,
+)
 
 
 def _page(page, **kw):
@@ -98,43 +96,43 @@ def _rule(**kw):
 
 class ParseRuleValues(unittest.TestCase):
     def test_operator_prefix_is_not_a_crash(self):
-        self.assertEqual(_parse_num(">=12"), 12.0)
+        self.assertEqual(parse_num(">=12"), 12.0)
 
     def test_word_spacing_value(self):
-        self.assertEqual(_parse_num("double"), 2.0)
+        self.assertEqual(parse_num("double"), 2.0)
 
     def test_spacing_noun_suffix_is_stripped(self):
-        self.assertEqual(_parse_num("single space"), 1.0)
+        self.assertEqual(parse_num("single space"), 1.0)
 
     def test_word_operator_is_recognised(self):
-        self.assertEqual(_parse_num_op("no more than 150 words"), (150.0, "<="))
+        self.assertEqual(parse_num_op("no more than 150 words"), (150.0, "<="))
 
     def test_unparseable_value_returns_none(self):
-        self.assertIsNone(_parse_num("A4"))
+        self.assertIsNone(parse_num("A4"))
 
     def test_at_least_allows_larger_value(self):
-        self.assertTrue(_num_ok(14.0, 12.0, ">=", 0.6))
+        self.assertTrue(num_ok(14.0, 12.0, ">=", 0.6))
 
     def test_at_least_rejects_smaller_value(self):
-        self.assertFalse(_num_ok(8.0, 12.0, ">=", 0.6))
+        self.assertFalse(num_ok(8.0, 12.0, ">=", 0.6))
 
     def test_exact_match_rejects_larger_value(self):
-        self.assertFalse(_num_ok(14.0, 12.0, "==", 0.6))
+        self.assertFalse(num_ok(14.0, 12.0, "==", 0.6))
 
 
 class TargetHandling(unittest.TestCase):
     def test_parenthetical_qualifier_is_stripped(self):
-        self.assertEqual(_strip_qualifier("Abstract (M.S. thesis)"), "Abstract")
+        self.assertEqual(strip_qualifier("Abstract (M.S. thesis)"), "Abstract")
 
     def test_literal_none_target_is_document_wide(self):
-        self.assertTrue(_is_generic_target("None"))
+        self.assertTrue(is_generic_target("None"))
 
     def test_named_section_is_not_document_wide(self):
-        self.assertFalse(_is_generic_target("Abstract"))
+        self.assertFalse(is_generic_target("Abstract"))
 
     def test_qualified_target_still_finds_section(self):
         text = "ABSTRACT\nSome abstract body text that is long enough.\nINTRODUCTION\nBody.\n"
-        self.assertIsNotNone(_find_section(text, "Abstract (M.S. thesis)"))
+        self.assertIsNotNone(find_section(text, "Abstract (M.S. thesis)"))
 
 
 class NoSilentPass(unittest.TestCase):
@@ -403,13 +401,13 @@ class BodyAlignment(unittest.TestCase):
             "Artificial Intelligence (AI) has transformed how researchers "
             "analyze large datasets and automate repetitive tasks."
         )
-        self.assertTrue(_is_body_text_line(line, 12.0))
+        self.assertTrue(is_body_text_line(line, 12.0))
 
     def test_fully_capitalised_line_is_excluded(self):
         # Unlike an embedded acronym, a line that is uppercase throughout
         # reads as a heading, not a body paragraph, and must stay excluded.
         line = "THE IMPACT OF AI ON MODERN RESEARCH METHODOLOGY AND PRACTICE"
-        self.assertFalse(_is_body_text_line(line, 12.0))
+        self.assertFalse(is_body_text_line(line, 12.0))
 
 
 class OperatorSemantics(unittest.TestCase):
@@ -454,15 +452,15 @@ class HeadingLevelSeparation(unittest.TestCase):
         return _info([pg])
 
     def test_chapter_target_matches_only_the_chapter_line(self):
-        found = _heading_candidates(self._doc(), "Chapter Heading")
+        found = heading_candidates(self._doc(), "Chapter Heading")
         self.assertEqual([ln["text"] for _, ln in found], ["CHAPTER 1: INTRODUCTION"])
 
     def test_section_target_matches_only_the_second_level_line(self):
-        found = _heading_candidates(self._doc(), "Section Heading")
+        found = heading_candidates(self._doc(), "Section Heading")
         self.assertEqual([ln["text"] for _, ln in found], ["1.1 Background"])
 
     def test_third_level_target_matches_only_the_third_level_line(self):
-        found = _heading_candidates(self._doc(), "Third Level Heading")
+        found = heading_candidates(self._doc(), "Third Level Heading")
         self.assertEqual([ln["text"] for _, ln in found], ["1.1.1 Reporting practice"])
 
     def test_both_size_rules_pass_on_one_compliant_document(self):
@@ -493,10 +491,10 @@ class HeadingLevelSeparation(unittest.TestCase):
                 "font_size": 12.0,
             },
         ]
-        self.assertEqual(_heading_candidates(_info([toc]), "Chapter Heading"), [])
+        self.assertEqual(heading_candidates(_info([toc]), "Chapter Heading"), [])
 
     def test_qualified_chapter_target_still_resolves(self):
-        found = _heading_candidates(self._doc(), "Chapter Heading (implied by context)")
+        found = heading_candidates(self._doc(), "Chapter Heading (implied by context)")
         self.assertEqual([ln["text"] for _, ln in found], ["CHAPTER 1: INTRODUCTION"])
 
 
@@ -523,13 +521,13 @@ class FontWeightDetection(unittest.TestCase):
         return _info([pg])
 
     def test_recorded_flag_is_trusted_over_the_normalised_name(self):
-        self.assertTrue(_span_is_bold({"font": "Times New Roman", "bold": True}))
+        self.assertTrue(span_is_bold({"font": "Times New Roman", "bold": True}))
 
     def test_font_name_is_the_fallback_when_no_flag_was_recorded(self):
-        self.assertTrue(_span_is_bold({"font": "TimesNewRomanPS-BoldMT"}))
+        self.assertTrue(span_is_bold({"font": "TimesNewRomanPS-BoldMT"}))
 
     def test_regular_span_is_not_bold(self):
-        self.assertFalse(_span_is_bold({"font": "Times New Roman", "bold": False}))
+        self.assertFalse(span_is_bold({"font": "Times New Roman", "bold": False}))
 
     def test_bold_heading_passes(self):
         row = _run(
@@ -668,17 +666,17 @@ class TitleCase(unittest.TestCase):
         }
 
     def test_to_title_case(self):
-        self.assertEqual(_to_title_case("of mice and man") == "of mice and man", False)
-        self.assertEqual(_to_title_case("university of ottawa"), "University of Ottawa")
-        self.assertEqual(_to_title_case("the impact of technology"), "The Impact of Technology")
+        self.assertEqual(to_title_case("of mice and man") == "of mice and man", False)
+        self.assertEqual(to_title_case("university of ottawa"), "University of Ottawa")
+        self.assertEqual(to_title_case("the impact of technology"), "The Impact of Technology")
         self.assertEqual(
-            _to_title_case("a study of the effects of technology"),
+            to_title_case("a study of the effects of technology"),
             "A Study of the Effects of Technology",
         )
-        self.assertEqual(_to_title_case("1.1 Background"), "1.1 Background")
-        self.assertEqual(_to_title_case("1.5 Scope and Significance"), "1.5 Scope and Significance")
+        self.assertEqual(to_title_case("1.1 Background"), "1.1 Background")
+        self.assertEqual(to_title_case("1.5 Scope and Significance"), "1.5 Scope and Significance")
         self.assertEqual(
-            _to_title_case("1.1 You and me will buy an AI subscriptions"),
+            to_title_case("1.1 You and me will buy an AI subscriptions"),
             "1.1 You and Me Will Buy an AI Subscriptions",
         )
 

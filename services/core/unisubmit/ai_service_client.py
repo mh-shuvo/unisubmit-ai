@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 import httpx
 
@@ -13,7 +14,7 @@ logger = logging.getLogger("unisubmit.ai_client")
 RAG_VALIDATE_TIMEOUT = float(os.getenv("RAG_VALIDATE_TIMEOUT", "1800"))
 
 
-def _auth() -> dict:
+def _auth() -> dict[str, str]:
     """The AI service rejects calls without the shared token (DEF-029). The
     request ID lets its log lines be matched with ours (P4.7)."""
     headers = {"Authorization": f"Bearer {get_settings().ai_service_token.get_secret_value()}"}
@@ -22,7 +23,7 @@ def _auth() -> dict:
     return headers
 
 
-def health(service_url: str) -> dict:
+def health(service_url: str) -> dict[str, Any]:
     """Synchronous so the admin page can call it from a plain `def` route (DEF-025)."""
     try:
         with httpx.Client(timeout=4, headers=_auth()) as c:
@@ -63,7 +64,7 @@ def _service_error(action: str, exc: httpx.HTTPError) -> AIServiceError:
     )
 
 
-async def rag_validate(service_url: str, payload: dict):
+async def rag_validate(service_url: str, payload: dict[str, Any]) -> Any:
     try:
         async with httpx.AsyncClient(timeout=RAG_VALIDATE_TIMEOUT, headers=_auth()) as c:
             r = await c.post(service_url.rstrip("/") + "/rag/validate", json=payload)
@@ -73,7 +74,7 @@ async def rag_validate(service_url: str, payload: dict):
         raise _service_error("AI validation", exc) from exc
 
 
-async def index_template(service_url: str, fields: dict, pdf_path: str):
+async def index_template(service_url: str, fields: dict[str, str], pdf_path: str) -> Any:
     """Raises AIServiceError when the call fails."""
     try:
         async with httpx.AsyncClient(timeout=300, headers=_auth()) as c:
@@ -89,7 +90,7 @@ async def index_template(service_url: str, fields: dict, pdf_path: str):
         raise _service_error("Guideline indexing", exc) from exc
 
 
-async def extract_format_profile(service_url: str, payload: dict):
+async def extract_format_profile(service_url: str, payload: dict[str, Any]) -> Any:
     try:
         async with httpx.AsyncClient(timeout=300, headers=_auth()) as c:
             r = await c.post(service_url.rstrip("/") + "/format/profile", json=payload)
@@ -99,7 +100,7 @@ async def extract_format_profile(service_url: str, payload: dict):
         return {"status": "error", "detail": str(e)}
 
 
-async def parse_guideline_profile(service_url: str, fields: dict, pdf_path: str):
+async def parse_guideline_profile(service_url: str, fields: dict[str, str], pdf_path: str) -> Any:
     """Raises AIServiceError when the call fails."""
     try:
         async with httpx.AsyncClient(timeout=1500, headers=_auth()) as c:

@@ -46,7 +46,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 "services/core/unisubmit/ai.py" = ["E501"]
 "services/core/unisubmit/ai_service_client.py" = ["ASYNC230", "PTH123"]
 "services/core/unisubmit/config.py" = ["PLR2004"]
-"services/core/unisubmit/format_validation.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR0917", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
+"services/core/unisubmit/validation/rules/*.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
 "services/core/unisubmit/pdf_utils.py" = ["B904", "B905", "PLR0912", "PLR0915", "PLR2004", "RUF007"]
 "services/core/unisubmit/report_parser.py" = ["E501", "PLW2901"]
 "services/core/unisubmit/reporting.py" = ["E501", "PLR0912", "PLR0915"]
@@ -65,31 +65,12 @@ explicit_package_bases = true
 module = ["fitz.*", "pymupdf.*", "reportlab.*", "FlagEmbedding.*"]
 ignore_missing_imports = true
 
-# Legacy baseline (P1.4): modules moved unchanged in P1.2 are not type-checked
-# yet (about 100 errors, mostly inference on untyped dicts and Starlette's old
-# TemplateResponse(name, context) form). New modules are strict; a module
-# leaves this list when it is typed, at the latest when it is split in
-# Phases 5 and 6.
+# Legacy baseline (P1.4): the AI service's main module is not type-checked
+# until it is split in Phase 6. Everything else is strict.
 [[tool.mypy.overrides]]
-module = [
-  "unisubmit.ai",
-  "unisubmit.ai_service_client",
-  "unisubmit.config",
-  "unisubmit.db",
-  "unisubmit.emailer",
-  "unisubmit.format_validation",
-  "unisubmit.pdf_utils",
-  "unisubmit.report_parser",
-  "unisubmit.reporting",
-  "unisubmit.validators",
-  "unisubmit_ai.main",
-]
+module = ["unisubmit_ai.main"]
 ignore_errors = true
 
-# Handlers call the untyped legacy helpers above until they are typed (P5.9).
-[[tool.mypy.overrides]]
-module = ["unisubmit.handlers"]
-disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]

@@ -2,6 +2,7 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import fitz
 
@@ -34,16 +35,16 @@ def _norm_font(name: str) -> str:
     return (name or "").split("+")[-1]
 
 
-def _weighted_mode(items):
+def _weighted_mode(items: list[tuple[Any, int]]) -> Any:
     if not items:
         return None
-    c = Counter()
+    c: Counter[Any] = Counter()
     for value, weight in items:
         c[value] += max(1, weight)
     return c.most_common(1)[0][0]
 
 
-def _percentile(values, p):
+def _percentile(values: list[float], p: float) -> float | None:
     if not values:
         return None
     vals = sorted(values)
@@ -54,7 +55,7 @@ def _percentile(values, p):
     return vals[f] * (c - k) + vals[c] * (k - f)
 
 
-def inspect_pdf(path: str):
+def inspect_pdf(path: str) -> dict[str, Any]:
     p = Path(path)
     if p.suffix.lower() != ".pdf":
         raise PDFError("Only PDF files are allowed.")
@@ -66,9 +67,13 @@ def inspect_pdf(path: str):
         doc.close()
         raise PDFError("Password-protected PDFs are not allowed.")
 
-    texts, page_sizes, font_sizes, page_details = [], [], [], []
+    texts: list[str] = []
+    page_sizes: list[tuple[float, float]] = []
+    font_sizes: list[float] = []
+    page_details: list[dict[str, Any]] = []
     hidden = []  # (page, text)
-    all_font_weighted, all_size_weighted = [], []
+    all_font_weighted: list[tuple[Any, int]] = []
+    all_size_weighted: list[tuple[Any, int]] = []
 
     for page_idx, page in enumerate(doc):
         rect = page.rect
@@ -76,11 +81,16 @@ def inspect_pdf(path: str):
         page_text = page.get_text("text")
         texts.append(page_text)
         d = page.get_text("dict")
-        spans, lines_meta = [], []
-        page_font_weighted, page_size_weighted = [], []
-        content_x0, content_x1, content_y0, content_y1 = [], [], [], []
-        body_lines = []
-        line_spacings = []
+        spans: list[dict[str, Any]] = []
+        lines_meta: list[dict[str, Any]] = []
+        page_font_weighted: list[tuple[Any, int]] = []
+        page_size_weighted: list[tuple[Any, int]] = []
+        content_x0: list[float] = []
+        content_x1: list[float] = []
+        content_y0: list[float] = []
+        content_y1: list[float] = []
+        body_lines: list[dict[str, Any]] = []
+        line_spacings: list[float] = []
 
         for block in d.get("blocks", []):
             for line in block.get("lines", []):
@@ -179,7 +189,7 @@ def inspect_pdf(path: str):
             if 0.8 * fs <= baseline_gap <= 3.0 * fs:
                 line_spacings.append(baseline_gap / fs)
 
-        margins = {}
+        margins: dict[str, Any] = {}
         # For PDF validation we cannot recover the original Word margin settings.
         # What we can verify reliably is the body-text frame and whether body content
         # intrudes into a required margin. Sparse pages must never look like a huge
@@ -190,10 +200,10 @@ def inspect_pdf(path: str):
             bx1 = [x["bbox"][2] for x in margin_evidence]
             by0 = [x["bbox"][1] for x in margin_evidence]
             by1 = [x["bbox"][3] for x in margin_evidence]
-            left = _percentile(bx0, 0.10)
+            left = _percentile(bx0, 0.10) or 0.0
             # Right edge uses the longest/fullest body lines only. The 90th percentile
             # avoids short lines making the right margin appear too large.
-            right = _percentile(bx1, 0.90)
+            right = _percentile(bx1, 0.90) or 0.0
             # Top/bottom are intrusion boundaries, not estimates of paragraph extent.
             top = min(by0)
             bottom = max(by1)
@@ -214,7 +224,7 @@ def inspect_pdf(path: str):
                 "height_mm": round(rect.height * PT_TO_MM, 1),
                 "dominant_font": _weighted_mode(page_font_weighted),
                 "dominant_font_size": _weighted_mode(page_size_weighted),
-                "estimated_line_spacing": round(_percentile(line_spacings, 0.5), 2)
+                "estimated_line_spacing": round(_percentile(line_spacings, 0.5) or 0.0, 2)
                 if line_spacings
                 else None,
                 "margins": margins,
@@ -243,16 +253,16 @@ def inspect_pdf(path: str):
     }
 
 
-def visible_text(info: dict) -> str:
+def visible_text(info: dict[str, Any]) -> str:
     """The document text without its hidden fragments, for the model (P4.9)."""
-    text = info["text"]
+    text = str(info["text"])
     for fragment in info.get("hidden_text", {}).get("fragments", []):
         if len(fragment) >= HIDDEN_FRAGMENT_MIN:
             text = text.replace(fragment, "")
     return text
 
 
-def hidden_text_result(info: dict) -> dict | None:
+def hidden_text_result(info: dict[str, Any]) -> dict[str, Any] | None:
     """A warning listing the pages with hidden or tiny text, or None."""
     hidden = info.get("hidden_text") or {}
     if not hidden.get("characters"):

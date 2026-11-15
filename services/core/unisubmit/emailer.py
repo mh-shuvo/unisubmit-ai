@@ -5,7 +5,9 @@ from pathlib import Path
 from .core.config import get_settings
 
 
-def send_submission_email(to_email: str, subject: str, body: str, attachments: list[str]):
+def send_submission_email(
+    to_email: str, subject: str, body: str, attachments: list[str]
+) -> tuple[bool, str]:
     settings = get_settings()
     if not settings.smtp_host:
         return False, "SMTP not configured. Email was not sent."

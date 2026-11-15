@@ -1,5 +1,6 @@
 import re
 from html import escape
+from typing import Any
 
 SECTION_ALIASES = {
     "COMPLIANCE ASSESSMENT": "compliance",
@@ -33,13 +34,13 @@ def _status_from_text(text: str) -> str:
     return "NOT VERIFIABLE"
 
 
-def parse_ai_report(text: str) -> dict:
+def parse_ai_report(text: str) -> dict[str, Any]:
     """Parse the constrained Markdown-like response returned by the RAG reviewer.
 
     Keeps raw text for audit while exposing predictable sections for the UI/PDF.
     """
     text = (text or "").replace("\r\n", "\n").strip()
-    sections = {k: [] for k in SECTION_ALIASES.values()}
+    sections: dict[str, list[str]] = {k: [] for k in SECTION_ALIASES.values()}
     current = None
 
     for raw_line in text.split("\n"):

@@ -1,3 +1,5 @@
+from typing import Any
+
 import httpx
 
 from .core.config import get_settings
@@ -5,7 +7,7 @@ from .core.config import get_settings
 SYSTEM_PROMPT = """You are a local academic pre-submission reviewer. You do not academically approve a thesis. Based only on the supplied approved guideline context and student text, produce concise improvement suggestions. Separate observations from mandatory compliance. Never invent a rule. Focus on clarity, research structure, methodology description, results/discussion, conclusion, figures/tables, references, and academic writing. Do not rewrite the entire report. Return plain text with 3-8 numbered suggestions. If there is insufficient evidence, say so."""
 
 
-async def get_ollama_status() -> dict:
+async def get_ollama_status() -> dict[str, Any]:
     """Return connection/model status without raising to the UI."""
     base = get_settings().ollama_url.rstrip("/")
     result = {
@@ -82,6 +84,6 @@ async def get_improvement_suggestions(guideline_text: str, student_text: str) ->
                 },
             )
             r.raise_for_status()
-            return r.json()["message"]["content"].strip()
+            return str(r.json()["message"]["content"]).strip()
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return "Local AI suggestions are temporarily unavailable. Compliance validation was still completed using approved rules."

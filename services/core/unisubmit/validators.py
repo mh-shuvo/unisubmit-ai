@@ -1,17 +1,20 @@
 import re
 from collections import Counter
+from typing import Any
+
+from .models import ValidationRule
 
 A4_PTS = (595.0, 842.0)
 
 
-def _normalize_heading(text):
+def _normalize_heading(text: str | None) -> str:
     t = re.sub(r"\s+", " ", (text or "").strip())
     t = re.sub(r"^chapter\s+(?:[0-9ivxlcdm]+|[a-z]+)\s*[:.\-–—]?\s*", "", t, flags=re.I)
     t = re.sub(r"^\d+(?:\.\d+)*\s*[:.\-–—]?\s*", "", t)
     return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
 
 
-def _section_heading_exists(info, target):
+def _section_heading_exists(info: dict[str, Any], target: str) -> bool:
     wanted = _normalize_heading(target)
     for pg in info.get("pages", []):
         text = "\n".join(x.get("text", "") for x in pg.get("lines", []))
@@ -24,7 +27,7 @@ def _section_heading_exists(info, target):
     return False
 
 
-def _result(rule, status, detected, message):
+def _result(rule: ValidationRule, status: str, detected: object, message: str) -> dict[str, Any]:
     if status == "FAIL" and rule.severity in {"Warning", "Recommendation"}:
         status = "WARNING"
     return {
@@ -41,7 +44,7 @@ def _result(rule, status, detected, message):
     }
 
 
-def validate_rule(rule, info):
+def validate_rule(rule: ValidationRule, info: dict[str, Any]) -> dict[str, Any]:
     text = info["text"]
     v = rule.validator
     target = (rule.target or "").strip()
@@ -162,7 +165,9 @@ def validate_rule(rule, info):
     return _result(rule, "WARNING", "Not evaluated", f"Validator '{v}' is not implemented yet.")
 
 
-def run_rules(rules, info):
+def run_rules(
+    rules: list[ValidationRule], info: dict[str, Any]
+) -> tuple[list[dict[str, Any]], str]:
     results = [validate_rule(r, info) for r in rules if r.enabled]
     mandatory_failed = any(r["severity"] == "Mandatory" and r["status"] == "FAIL" for r in results)
     return results, ("REVISION REQUIRED" if mandatory_failed else "PASSED")
