@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-59 entries: 51 defects and 8 limitations. 5 open, 54 closed.
+59 entries: 51 defects and 8 limitations. 4 open, 55 closed.
 
 ---
 
@@ -26,7 +26,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [LIM-003](LIM-003.md) | One Ollama instance is a shared serial resource with no admission control | limitation | `resource-contention` | major | Any throughput claim; running `test_job.py` beside the live worker | 2026-10-27 |
 | [LIM-005](LIM-005.md) | Reproduction artefacts the defect documents cite no longer exist | limitation | `observability-gap` | blocking | Replaying any quantitative claim in the episode documents | 2026-11-02 |
 | [DEF-021](DEF-021.md) | An unavailable repair service is reported as invalid model output | defect | `observability-gap` | major | Nothing; misdirects diagnosis of a model-service outage | 2026-11-02 |
-| [DEF-044](DEF-044.md) | The web app's copy of the semantic-rule merge still misreads scalar `source_pages` | defect | `llm-output-contract` | major | Saving a parsed profile whose model output gives pages as a number | 2026-11-14 |
 
 ---
 
@@ -89,6 +88,7 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [LIM-006](LIM-006.md) | The test suite runs only when invoked by hand | limitation | `observability-gap` | n/a | v10.0, `4bb65a6` | `.github/workflows/ci.yml` |
 | [DEF-042](DEF-042.md) | File paths are stored as absolute, environment-specific paths | defect | `runtime-environment` | Assignment/Initialisation | v10.1, `e44df44` | `test_uploads_are_stored_in_the_universitys_folder` |
 | [DEF-043](DEF-043.md) | Supervisor emails and unit names are unique across the whole installation | defect | `scope-leakage` | Relationship | v10.1, `e44df44` | `test_same_supervisor_email_may_exist_in_two_universities` |
+| [DEF-044](DEF-044.md) | The web app's copy of the semantic-rule merge still misreads scalar `source_pages` | defect | `llm-output-contract` | Checking | v10.4, `d2f138d` | `test_a_string_is_one_page_not_one_per_digit` |
 | [DEF-049](DEF-049.md) | The submission configuration page returns its refusal instead of raising it | defect | `insecure-default` | Checking | v10.1, `e44df44` | `test_unit_pages_refuse_a_university_admin` |
 | [DEF-050](DEF-050.md) | Adopting a pre-migration database compared it with the latest models | defect | `schema-drift` | Algorithm/Method | v10.1, `e44df44` (introduced and fixed before merge) | `test_v9_14_database_is_adopted_and_upgraded` |
 | [DEF-051](DEF-051.md) | An SMTP failure after a passed validation re-runs the validation and can mark it failed | defect | `job-coordination` | Function | v10.2, `74ca214` | `test_smtp_failure_is_retried_not_fatal` |
@@ -101,7 +101,7 @@ restructuring plan, branch `phase-0-demo-critical-fixes`) in
 `phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`; `DEF-042`, `DEF-043`,
 `DEF-049` and `DEF-050` (Phase 2, same branch) in `CHANGELOG_v10_1.md`; `DEF-037`, `DEF-038` and
 `DEF-051` (Phase 3, same branch) in `CHANGELOG_v10_2.md`; `DEF-040` and `DEF-041` (Phase 4,
-same branch) in `CHANGELOG_v10_3.md`. `DEF-017` to `DEF-019` are on branch
+same branch) in `CHANGELOG_v10_3.md`; `DEF-044` (Phase 5, same branch) in `CHANGELOG_v10_4.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---

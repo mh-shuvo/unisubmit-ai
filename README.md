@@ -67,7 +67,10 @@ student and per university in any 24 hours (`UNISUBMIT_DAILY_UPLOADS_PER_*`).
 
 | Path | What |
 |---|---|
-| `services/core/unisubmit/` | Web app (`main.py`), queue worker, `unisubmit` CLI, migrations |
+| `services/core/unisubmit/` | Web app (`main.py` builds it from the routers below), queue worker (`worker.py`, `handlers.py`, `queue.py`), `unisubmit` CLI, migrations |
+| `…/auth/`, `…/tenancy/`, `…/organisation/`, `…/guidelines/`, `…/submissions/`, `…/portal/`, `…/system/` | One router per area; services, dependencies and profile helpers beside them |
+| `…/validation/rules/` | The deterministic guideline rules: layout, typography, structure, cover, and the engine that runs them |
+| `…/core/` | Settings, database, errors, logging, security (passwords, CSRF), templates |
 | `services/ai/unisubmit_ai/` | AI service: guideline parsing, RAG indexing, semantic validation |
 | `services/*/tests/` | Test suites; the core's `integration/` tests need PostgreSQL |
 | `pyproject.toml`, `uv.lock` | One uv workspace for both services, Python 3.13 |
