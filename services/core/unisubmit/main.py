@@ -1,16 +1,15 @@
-import json
-import shutil
+import copy
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
@@ -21,16 +20,21 @@ from .core.config import get_settings
 from .core.db import DbSession, create_db_engine, make_session_factory
 from .models import (
     ACTIVE_JOB_STATUSES,
+    IN_PROGRESS,
     AdminRole,
     AdminUser,
     AIProfile,
+    AIProfileStatus,
     Department,
     Faculty,
+    GuidelineStatus,
     Institute,
     JobType,
+    ProfileStatus,
     Program,
     StudentUser,
     Submission,
+    SubmissionStatus,
     SubmissionVersion,
     Teacher,
     Template,
@@ -330,7 +334,7 @@ def guidelines(slug: str, request: Request, db: DbSession):
 @router.get("/guidelines/{version_id}/download")
 def guideline_download(version_id: int, db: DbSession):
     tv = db.get(TemplateVersion, version_id)
-    if not tv or tv.status != "Active":
+    if not tv or tv.status != GuidelineStatus.ACTIVE:
         raise HTTPException(404)
     try:
         path = storage.resolve(tv.pdf_path)
@@ -453,9 +457,9 @@ def student_dashboard(request: Request, db: DbSession):
     )
     counts = {
         "total": len(rows),
-        "queued": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
-        "revision": sum(1 for x in rows if x.status == "REVISION REQUIRED"),
-        "passed": sum(1 for x in rows if x.status == "PASSED"),
+        "queued": sum(1 for x in rows if x.status in IN_PROGRESS),
+        "revision": sum(1 for x in rows if x.status == SubmissionStatus.REVISION_REQUIRED),
+        "passed": sum(1 for x in rows if x.status == SubmissionStatus.PASSED),
     }
     return templates.TemplateResponse(
         request,
@@ -536,7 +540,7 @@ def admin_dashboard(request: Request, db: DbSession):
             "programs": len(queries.unit_programs(db, u)),
             "supervisors": len(queries.unit_teachers(db, u)),
             "submissions": len(rows),
-            "queue": sum(1 for x in rows if x.status in ("QUEUED", "PROCESSING", "RETRYING")),
+            "queue": sum(1 for x in rows if x.status in IN_PROGRESS),
         }
     return templates.TemplateResponse(
         request, "admin_dashboard.html", {"request": request, "admin": u, "metrics": metrics}
@@ -946,45 +950,32 @@ def add_version(
     t = db.get(Template, template_id)
     if u.role != AdminRole.UNIT_ADMIN or not t or not same_unit(t.program, u):
         raise HTTPException(403)
-    if not pdf.filename.lower().endswith(".pdf"):
-        return RedirectResponse(
-            flash_url("/admin/configuration", error="Guideline must be PDF"), 303
-        )
-    dest = storage.directory(u.university_id, "guidelines") / f"guideline_{uuid.uuid4().hex}.pdf"
-    with dest.open("wb") as f:
-        shutil.copyfileobj(pdf.file, f)
+    if status not in set(GuidelineStatus):
+        raise HTTPException(400, "Unknown guideline status")
     try:
-        info = inspect_pdf(str(dest))
-    except PDFError as e:
-        dest.unlink(missing_ok=True)
+        guideline, info = store_pdf(pdf, u.university_id, "guidelines", "guideline")
+    except UploadRefused as e:
         return RedirectResponse(flash_url("/admin/configuration", error=str(e)), 303)
     add_path = ""
     add_text = ""
     if additional_rules_pdf and additional_rules_pdf.filename:
-        if not additional_rules_pdf.filename.lower().endswith(".pdf"):
-            return RedirectResponse(
-                flash_url(
-                    "/admin/configuration",
-                    error="Additional rules document must be PDF",
-                ),
-                303,
-            )
-        ad = storage.directory(u.university_id, "guidelines") / f"additional_{uuid.uuid4().hex}.pdf"
-        with ad.open("wb") as f:
-            shutil.copyfileobj(additional_rules_pdf.file, f)
         try:
-            ai = inspect_pdf(str(ad))
-            add_path = storage.relative(ad)
-            add_text = ai["text"]
-        except PDFError:
-            ad.unlink(missing_ok=True)
+            extra, extra_info = store_pdf(
+                additional_rules_pdf, u.university_id, "guidelines", "additional"
+            )
+            add_path = extra.relative_path
+            add_text = extra_info["text"]
+        except UploadRefused as e:
+            storage.delete(guideline.relative_path)
+            error = f"Additional rules document: {e}"
+            return RedirectResponse(flash_url("/admin/configuration", error=error), 303)
     tv = TemplateVersion(
         template_id=t.id,
         version=version.strip(),
         effective_from=effective_from,
-        status=status,
+        status=GuidelineStatus(status),
         change_note=change_note,
-        pdf_path=storage.relative(dest),
+        pdf_path=guideline.relative_path,
         extracted_text=info["text"],
         additional_rules_pdf_path=add_path,
         additional_rules_text=add_text,
@@ -1014,10 +1005,7 @@ def template_version_page(version_id: int, request: Request, db: DbSession):
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    try:
-        parsed_profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        parsed_profile = {}
+    parsed_profile = copy.deepcopy(tv.format_profile_json or {})
     parsed_profile = _normalize_profile_severities(parsed_profile)
     job = queue.latest_job(db, f"template_version:{tv.id}")
     return templates.TemplateResponse(
@@ -1052,10 +1040,7 @@ def review_guideline_rules(
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    try:
-        profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        profile = {}
+    profile = copy.deepcopy(tv.format_profile_json or {})
     if not profile:
         return RedirectResponse(
             flash_url(
@@ -1101,8 +1086,8 @@ def review_guideline_rules(
             }
         )
         profile["review_audit"] = audit[-100:]
-        tv.format_profile_json = json.dumps(profile)
-        tv.format_profile_status = "Parsed - Review Required"
+        tv.format_profile_json = profile
+        tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
         db.commit()
         return RedirectResponse(
             flash_url(
@@ -1147,10 +1132,7 @@ def add_manual_semantic_rule(
         )
     if severity not in {"Mandatory", "Warning", "Recommendation", "Ignore"}:
         severity = "Mandatory"
-    try:
-        profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        profile = {}
+    profile = copy.deepcopy(tv.format_profile_json or {})
     profile = _normalize_profile_severities(
         profile or {"deterministic_rules": [], "semantic_requirements": []}
     )
@@ -1176,8 +1158,8 @@ def add_manual_semantic_rule(
     profile.setdefault("semantic_requirements", []).append(new)
     profile = _dedupe_semantic_requirements(profile)
     after = len(profile.get("semantic_requirements") or [])
-    tv.format_profile_json = json.dumps(profile)
-    tv.format_profile_status = "Parsed - Review Required"
+    tv.format_profile_json = profile
+    tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
     db.commit()
     msg = (
         "Manual semantic rule added."
@@ -1202,10 +1184,7 @@ def update_manual_semantic_rule(
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    try:
-        profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        profile = {}
+    profile = copy.deepcopy(tv.format_profile_json or {})
     profile = _normalize_profile_severities(profile)
     found = None
     for r in profile.get("semantic_requirements", []) or []:
@@ -1238,8 +1217,8 @@ def update_manual_semantic_rule(
         }
     )
     profile = _dedupe_semantic_requirements(profile)
-    tv.format_profile_json = json.dumps(profile)
-    tv.format_profile_status = "Parsed - Review Required"
+    tv.format_profile_json = profile
+    tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1256,10 +1235,7 @@ def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Requ
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    try:
-        profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        profile = {}
+    profile = copy.deepcopy(tv.format_profile_json or {})
     profile = _normalize_profile_severities(profile)
     old = profile.get("semantic_requirements", []) or []
     new = [r for r in old if not (str(r.get("semantic_id")) == semantic_id and r.get("manual"))]
@@ -1272,8 +1248,8 @@ def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Requ
             303,
         )
     profile["semantic_requirements"] = new
-    tv.format_profile_json = json.dumps(profile)
-    tv.format_profile_status = "Parsed - Review Required"
+    tv.format_profile_json = profile
+    tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1290,10 +1266,7 @@ def activate_guideline_profile(version_id: int, request: Request, db: DbSession)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    try:
-        profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        profile = {}
+    profile = copy.deepcopy(tv.format_profile_json or {})
     if not profile or (
         not profile.get("deterministic_rules") and not profile.get("semantic_requirements")
     ):
@@ -1313,7 +1286,7 @@ def activate_guideline_profile(version_id: int, request: Request, db: DbSession)
             ),
             303,
         )
-    tv.format_profile_status = "Active"
+    tv.format_profile_status = ProfileStatus.ACTIVE
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1439,7 +1412,7 @@ def student_options(program_id: int, request: Request, db: DbSession):
     versions = []
     for t in p.templates:
         for v in t.versions:
-            if v.status == "Active":
+            if v.status == GuidelineStatus.ACTIVE:
                 versions.append(
                     {
                         "id": v.id,
@@ -1464,7 +1437,12 @@ def submit_form(request: Request, db: DbSession):
     return templates.TemplateResponse(
         request,
         "submit.html",
-        {"request": request, "student": s, "programs": queries.unit_programs(db, s)},
+        {
+            "request": request,
+            "student": s,
+            "programs": queries.unit_programs(db, s),
+            "error": request.query_params.get("error", ""),
+        },
     )
 
 
@@ -1490,29 +1468,64 @@ def submit(
         raise HTTPException(403)
     if s.institute_id and teacher.institute_id != s.institute_id:
         raise HTTPException(403)
-    aip = (
-        db.query(AIProfile)
-        .filter(
-            AIProfile.program_id == p.id,
-            AIProfile.submission_type == tv.template.submission_type,
-            AIProfile.status == "Active",
+    try:
+        stored, info = store_pdf(pdf, s.university_id, "submissions", f"submission_s{s.id}")
+    except UploadRefused as e:
+        return RedirectResponse(flash_url("/submit", error=str(e)), 303)
+    try:
+        # A double-click's second request waits here for the first (DEF-037).
+        db.query(StudentUser).filter(StudentUser.id == s.id).with_for_update().one()
+        duplicate = db.scalars(
+            select(Submission)
+            .join(SubmissionVersion, SubmissionVersion.submission_id == Submission.id)
+            .where(
+                Submission.student_user_id == s.id,
+                Submission.template_version_id == tv.id,
+                Submission.status.in_(IN_PROGRESS),
+                SubmissionVersion.sha256 == stored.sha256,
+            )
+        ).first()
+        if duplicate is not None:
+            db.rollback()
+            storage.delete(stored.relative_path)
+            return RedirectResponse(
+                flash_url(
+                    f"/submission/{duplicate.id}",
+                    message="This file is already being validated as this submission.",
+                ),
+                303,
+            )
+        check_upload_caps(db, s)
+        aip = (
+            db.query(AIProfile)
+            .filter(
+                AIProfile.program_id == p.id,
+                AIProfile.submission_type == tv.template.submission_type,
+                AIProfile.status == AIProfileStatus.ACTIVE,
+            )
+            .first()
         )
-        .first()
-    )
-    sub = Submission(
-        university_id=s.university_id,
-        student_user_id=s.id,
-        title=title.strip(),
-        program_id=p.id,
-        teacher_id=teacher.id,
-        template_version_id=tv.id,
-        ai_profile_id=aip.id if aip else None,
-        status="QUEUED",
-    )
-    db.add(sub)
-    db.commit()
-    db.refresh(sub)
-    save_queue_version(sub, pdf, db)
+        sub = Submission(
+            university_id=s.university_id,
+            student_user_id=s.id,
+            title=title.strip(),
+            program_id=p.id,
+            teacher_id=teacher.id,
+            template_version_id=tv.id,
+            ai_profile_id=aip.id if aip else None,
+        )
+        db.add(sub)
+        db.flush()
+        queue_version(db, sub, stored, info, version_no=1)
+        db.commit()  # submission, version and job: all or none
+    except UploadRefused as e:
+        db.rollback()
+        storage.delete(stored.relative_path)
+        return RedirectResponse(flash_url("/submit", error=str(e)), 303)
+    except BaseException:
+        db.rollback()
+        storage.delete(stored.relative_path)
+        raise
     return RedirectResponse(f"/submission/{sub.id}", 303)
 
 
@@ -1527,69 +1540,131 @@ def resubmit(
     sub = db.get(Submission, submission_id)
     if not sub or sub.student_user_id != s.id:
         raise HTTPException(404)
-    if save_queue_version(sub, pdf, db) is None:
+    page = f"/submission/{sub.id}"
+    try:
+        version = save_queue_version(sub, pdf, db)
+    except UploadRefused as e:
+        return RedirectResponse(flash_url(page, error=str(e)), 303)
+    if version is None:
         return RedirectResponse(
-            flash_url(
-                f"/submission/{sub.id}",
-                error="This submission is still being validated. Upload a revised version after the result is ready.",
-            ),
+            flash_url(page, message="This file is the latest version already; nothing was queued."),
             303,
         )
-    return RedirectResponse(f"/submission/{sub.id}", 303)
+    return RedirectResponse(page, 303)
 
 
-def save_queue_version(sub, pdf, db):
-    """Store an uploaded PDF as the next version and queue it.
+class UploadRefused(ValueError):
+    """An upload that was not accepted; the message is shown to the uploader."""
 
-    Returns None, storing nothing, while an earlier version is still queued or
-    running: a double-click must not number two uploads alike or queue a second
-    GPU job (DEF-026).
+
+def store_pdf(pdf: UploadFile, university_id: int, kind: storage.Kind, prefix: str):
+    """Store an upload and read it; returns (StoredFile, inspect_pdf info).
+
+    Rejects files that are not PDFs, too large, encrypted or unreadable, and
+    leaves no file behind when it does (P3.8).
     """
-    if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are allowed")
-    # Concurrent uploads for this submission wait here, one at a time.
-    db.query(Submission).filter(Submission.id == sub.id).with_for_update().one()
-    subject = f"submission:{sub.id}"
-    if queue.has_active_job(db, subject):
-        db.rollback()
-        return None
-    version_no = (
-        db.query(func.max(SubmissionVersion.version_no))
-        .filter(SubmissionVersion.submission_id == sub.id)
-        .scalar()
-        or 0
-    ) + 1
-    dest = (
-        storage.directory(sub.university_id, "submissions")
-        / f"submission_{sub.id}_v{version_no}_{uuid.uuid4().hex[:8]}.pdf"
-    )
-    with dest.open("wb") as f:
-        shutil.copyfileobj(pdf.file, f)
     try:
-        info = inspect_pdf(str(dest))
+        stored = storage.save_pdf(pdf.file, university_id, kind, prefix)
+    except storage.UploadRejected as e:
+        raise UploadRefused(str(e)) from None
+    try:
+        return stored, inspect_pdf(str(storage.resolve(stored.relative_path)))
     except PDFError as e:
-        dest.unlink(missing_ok=True)
-        raise HTTPException(400, str(e))
+        storage.delete(stored.relative_path)
+        raise UploadRefused(str(e)) from None
+
+
+def check_upload_caps(db: Session, student: StudentUser) -> None:
+    """Daily upload caps per student and per university (P3.11). The caller
+    holds the student's row lock, so the student's own count cannot race."""
+    settings = get_settings()
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)  # naive UTC columns
+    recent = (
+        select(func.count(SubmissionVersion.id))
+        .join(Submission, SubmissionVersion.submission_id == Submission.id)
+        .where(SubmissionVersion.created_at > since)
+    )
+    if (
+        db.scalar(recent.where(Submission.student_user_id == student.id))
+        >= settings.daily_uploads_per_student
+    ):
+        raise UploadRefused(
+            f"You have uploaded {settings.daily_uploads_per_student} versions in the last "
+            "24 hours, the daily limit. Try again later."
+        )
+    if (
+        db.scalar(recent.where(Submission.university_id == student.university_id))
+        >= settings.daily_uploads_per_university
+    ):
+        raise UploadRefused("Your university has reached its daily upload limit. Try again later.")
+
+
+def queue_version(db: Session, sub: Submission, stored, info, version_no: int):
+    """Add a version for a stored file and queue its validation; the caller commits."""
     sv = SubmissionVersion(
         submission_id=sub.id,
         version_no=version_no,
-        pdf_path=storage.relative(dest),
+        pdf_path=stored.relative_path,
+        sha256=stored.sha256,
+        size_bytes=stored.size_bytes,
+        page_count=info["page_count"],
         extracted_text=info["text"],
-        status="QUEUED",
+        status=SubmissionStatus.QUEUED,
     )
     db.add(sv)
-    sub.status = "QUEUED"
-    db.flush()
-    # One commit: committing the version first released the lock before its
-    # job existed, and a second upload in that gap saw no active job (DEF-046).
+    sub.status = SubmissionStatus.QUEUED
+    db.flush()  # assigns sv.id for the job
     queue.enqueue(
         db,
         JobType.VALIDATE_SUBMISSION,
-        subject,
+        f"submission:{sub.id}",
         {"submission_version_id": sv.id},
         university_id=sub.university_id,
     )
-    db.commit()
+    return sv
+
+
+def save_queue_version(sub, pdf, db):
+    """Store an uploaded PDF as the next version of `sub` and queue it.
+
+    Returns None, keeping nothing, when the file is identical to the latest
+    version (a double-click). Raises UploadRefused while an earlier version
+    is still queued or running: two uploads must not be numbered alike or
+    queue a second GPU job (DEF-026).
+    """
+    stored, info = store_pdf(pdf, sub.university_id, "submissions", f"submission_{sub.id}")
+    try:
+        # Concurrent uploads for this submission wait here, one at a time.
+        db.query(Submission).filter(Submission.id == sub.id).with_for_update().one()
+        latest = db.scalars(
+            select(SubmissionVersion)
+            .where(SubmissionVersion.submission_id == sub.id)
+            .order_by(SubmissionVersion.version_no.desc())
+            .limit(1)
+        ).first()
+        # A failed validation may be retried with the same file.
+        if (
+            latest is not None
+            and latest.sha256 == stored.sha256
+            and latest.status != SubmissionStatus.VALIDATION_FAILED
+        ):
+            db.rollback()
+            storage.delete(stored.relative_path)
+            return None
+        if queue.has_active_job(db, f"submission:{sub.id}"):
+            raise UploadRefused(
+                "This submission is still being validated. "
+                "Upload a revised version after the result is ready."
+            )
+        check_upload_caps(db, sub.student)
+        # One commit: committing the version first released the lock before its
+        # job existed, and a second upload in that gap saw no active job (DEF-046).
+        sv = queue_version(db, sub, stored, info, (latest.version_no if latest else 0) + 1)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        storage.delete(stored.relative_path)
+        raise
     return sv
 
 
@@ -1600,7 +1675,7 @@ def view_submission(submission_id: int, request: Request, db: DbSession):
     if not sub or sub.student_user_id != s.id:
         raise HTTPException(404)
     versions = [
-        {"obj": v, "results": json.loads(v.validation_json or "[]")}
+        {"obj": v, "results": (v.validation_json or [])}
         for v in sorted(sub.versions, key=lambda x: x.version_no, reverse=True)
     ]
     return templates.TemplateResponse(
@@ -1640,7 +1715,7 @@ def view_validation_report(submission_id: int, version_id: int, request: Request
     if not sub or sub.student_user_id != s.id or not v or v.submission_id != sub.id:
         raise HTTPException(404)
     parsed = parse_ai_report(v.ai_suggestions or "")
-    results = json.loads(v.validation_json or "[]")
+    results = v.validation_json or []
     stats_entry = next((r for r in results if r.get("category") == "Validation Statistics"), None)
     visible_results = [r for r in results if r.get("category") != "Validation Statistics"]
     format_results = [r for r in visible_results if r.get("category") == "Formatting Compliance"]
@@ -1710,7 +1785,7 @@ def download_report_bound(
             409,
             "This report link belongs to an older validation run. Refresh the full report and download the current run.",
         )
-    results = json.loads(v.validation_json or "[]")
+    results = v.validation_json or []
     report = (
         storage.directory(v.submission.university_id, "reports")
         / f"validation_submission_{v.submission_id}_v{v.version_no}_{current_token}.pdf"
@@ -1750,7 +1825,7 @@ def semantic_validation_payload(program, tv, fmt_profile, student_text, base_mod
                 for r in fmt_profile.get("semantic_requirements", [])
                 if r.get("enabled", True) and r.get("final_severity") != "Ignore"
             ]
-            if isinstance(fmt_profile, dict) and tv.format_profile_status == "Active"
+            if isinstance(fmt_profile, dict) and tv.format_profile_status == ProfileStatus.ACTIVE
             else []
         ),
     }

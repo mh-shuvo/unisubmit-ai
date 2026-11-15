@@ -7,7 +7,7 @@ an email is never sent twice for a version that has `emailed_at` set.
 """
 
 import asyncio
-import json
+import copy
 import smtplib
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
@@ -32,7 +32,18 @@ from .main import (
     _report_run_token,
     semantic_validation_payload,
 )
-from .models import AIProfile, JobType, Program, SubmissionVersion, TemplateVersion
+from .models import (
+    AIProfile,
+    AIProfileStatus,
+    EmailStatus,
+    JobType,
+    ProfileStatus,
+    Program,
+    RagStatus,
+    SubmissionStatus,
+    SubmissionVersion,
+    TemplateVersion,
+)
 from .pdf_utils import inspect_pdf
 from .queue import FollowUp, TransientError
 from .reporting import build_validation_report
@@ -83,19 +94,12 @@ def _guideline(db: Session, payload: Payload) -> TemplateVersion:
     return guideline
 
 
-def _loads(stored: str, empty: Any) -> Any:
-    try:
-        return json.loads(stored or "null") or empty
-    except ValueError:
-        return empty
-
-
 @dataclass(frozen=True, slots=True)
 class _Checked:
     """A validation's deterministic half, ready for the AI's semantic half."""
 
     results: list[dict[str, Any]]
-    status: str
+    status: SubmissionStatus
     profile: dict[str, Any]
     ai_payload: dict[str, Any] | None
     ai_note: str
@@ -122,27 +126,28 @@ class ValidateSubmission:
         with self._sessions.begin() as db:
             version = db.get(SubmissionVersion, payload["submission_version_id"])
             if version is not None:
-                version.status = version.submission.status = "Validation Failed"
+                version.status = version.submission.status = SubmissionStatus.VALIDATION_FAILED
 
     @staticmethod
     def _check(version: SubmissionVersion) -> _Checked:
         submission = version.submission
         guideline = submission.template_version
-        version.status = submission.status = "PROCESSING"
+        version.status = submission.status = SubmissionStatus.PROCESSING
         info = inspect_pdf(str(storage.resolve(version.pdf_path)))
-        results, status = run_rules(guideline.rules, info)
-        profile = _normalize_profile_severities(_loads(guideline.format_profile_json, {}))
+        results, outcome = run_rules(guideline.rules, info)
+        status = SubmissionStatus(outcome)
+        profile = _normalize_profile_severities(copy.deepcopy(guideline.format_profile_json or {}))
         format_results = (
             validate_all_profile_rules(profile, info)
-            if guideline.format_profile_status == "Active"
+            if guideline.format_profile_status == ProfileStatus.ACTIVE
             else []
         )
         if any(
             r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in format_results
         ):
-            status = "REVISION REQUIRED"
+            status = SubmissionStatus.REVISION_REQUIRED
         ai_payload, ai_note = None, "AI validation unavailable."
-        if submission.ai_profile and guideline.rag_status == "Indexed":
+        if submission.ai_profile and guideline.rag_status == RagStatus.INDEXED:
             ai_payload = semantic_validation_payload(
                 submission.program,
                 guideline,
@@ -172,10 +177,10 @@ class ValidateSubmission:
             if any(
                 r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in semantic
             ):
-                status = "REVISION REQUIRED"
+                status = SubmissionStatus.REVISION_REQUIRED
         stats = _profile_rule_stats(checked.profile, results, submission.template_version.rules)
         results.append({"category": "Validation Statistics", "status": "META", "statistics": stats})
-        version.validation_json = json.dumps(results)
+        version.validation_json = results
         version.ai_suggestions = ai_text
         version.status = submission.status = status
         report = (
@@ -185,9 +190,9 @@ class ValidateSubmission:
         )
         build_validation_report(str(report), submission, version, results, ai_text)
         version.report_path = storage.relative(report)
-        if status != "PASSED" or version.emailed_at is not None:
+        if status != SubmissionStatus.PASSED or version.emailed_at is not None:
             return []
-        submission.email_status = "Queued"
+        submission.email_status = EmailStatus.QUEUED
         # Its own subject: a slow SMTP server must not block the next upload.
         return [
             FollowUp(
@@ -238,14 +243,16 @@ class SendSupervisorEmail:
             version = _version(db, payload)
             if sent:
                 version.emailed_at = datetime.now(UTC).replace(tzinfo=None)  # naive UTC column
-            version.submission.email_status = "Sent" if sent else "SMTP Not Configured"
+            version.submission.email_status = (
+                EmailStatus.SENT if sent else EmailStatus.NOT_CONFIGURED
+            )
         return []
 
     def on_final_failure(self, payload: Payload) -> None:
         with self._sessions.begin() as db:
             version = db.get(SubmissionVersion, payload["submission_version_id"])
             if version is not None:
-                version.submission.email_status = "Failed"
+                version.submission.email_status = EmailStatus.FAILED
 
 
 def _ai_profile(db: Session, guideline: TemplateVersion) -> AIProfile:
@@ -260,7 +267,7 @@ def _ai_profile(db: Session, guideline: TemplateVersion) -> AIProfile:
             program_id=program.id,
             submission_type=kind,
             service_url=get_settings().ai_service_url,
-            status="Active",
+            status=AIProfileStatus.ACTIVE,
         )
         db.add(profile)
         db.flush()
@@ -294,7 +301,7 @@ class ParseGuideline:
         with self._sessions.begin() as db:
             guideline = _guideline(db, payload)
             # Rules and audit entries written by administrators survive re-parsing.
-            previous = _loads(guideline.format_profile_json, {})
+            previous = guideline.format_profile_json or {}
             profile = parsed.get("profile") or {
                 "deterministic_rules": [],
                 "semantic_requirements": [],
@@ -307,12 +314,12 @@ class ParseGuideline:
             if previous.get("review_audit"):
                 profile["review_audit"] = list(previous["review_audit"])[-100:]
             profile = _normalize_profile_severities(profile)
-            guideline.format_profile_json = json.dumps(profile)
+            guideline.format_profile_json = profile
             rules = len(profile.get("deterministic_rules", [])) + len(
                 profile.get("semantic_requirements", [])
             )
             guideline.format_profile_status = (
-                "Parsed - Review Required" if rules else "Parsed - No Explicit Rules Found"
+                ProfileStatus.REVIEW_REQUIRED if rules else ProfileStatus.NO_RULES
             )
         return [FollowUp(JobType.INDEX_GUIDELINE, f"template_version:{guideline.id}", payload)]
 
@@ -320,8 +327,8 @@ class ParseGuideline:
         with self._sessions.begin() as db:
             guideline = db.get(TemplateVersion, payload["template_version_id"])
             if guideline is not None:
-                guideline.format_profile_json = "{}"
-                guideline.format_profile_status = "Parsing Failed"
+                guideline.format_profile_json = {}
+                guideline.format_profile_status = ProfileStatus.PARSING_FAILED
 
 
 class IndexGuideline:
@@ -357,15 +364,15 @@ class IndexGuideline:
             fields = {**fields, "recreate": "false"}  # additional rules join the collection
         with self._sessions.begin() as db:
             guideline = _guideline(db, payload)
-            guideline.rag_status = "Indexed"
+            guideline.rag_status = RagStatus.INDEXED
             guideline.rag_collection = collection
             profile = _ai_profile(db, guideline)
             profile.rag_collection = collection
-            profile.status = "Active"
+            profile.status = AIProfileStatus.ACTIVE
         return []
 
     def on_final_failure(self, payload: Payload) -> None:
         with self._sessions.begin() as db:
             guideline = db.get(TemplateVersion, payload["template_version_id"])
             if guideline is not None:
-                guideline.rag_status = "Index Failed"
+                guideline.rag_status = RagStatus.INDEX_FAILED

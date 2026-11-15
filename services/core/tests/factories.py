@@ -149,7 +149,7 @@ VERSION_STATUS = {
     JobStatus.QUEUED: "QUEUED",
     JobStatus.RUNNING: "PROCESSING",
     JobStatus.SUCCEEDED: "PASSED",
-    JobStatus.FAILED: "Validation Failed",
+    JobStatus.FAILED: "VALIDATION FAILED",
 }
 
 

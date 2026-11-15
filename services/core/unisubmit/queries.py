@@ -12,6 +12,7 @@ from .models import (
     AdminUser,
     Department,
     Faculty,
+    GuidelineStatus,
     Institute,
     Job,
     Program,
@@ -76,7 +77,10 @@ def active_guidelines(db: Session, university_id: int) -> list[TemplateVersion]:
             select(TemplateVersion)
             .join(Template, TemplateVersion.template_id == Template.id)
             .join(Program, Template.program_id == Program.id)
-            .where(TemplateVersion.status == "Active", program_in_university(university_id))
+            .where(
+                TemplateVersion.status == GuidelineStatus.ACTIVE,
+                program_in_university(university_id),
+            )
             .order_by(TemplateVersion.created_at.desc())
         )
     )

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     smtp_password: SecretStr = SecretStr("")
     smtp_from: str = "unisubmit@example.edu"
     smtp_use_tls: bool = True
+    # Uploads larger than this are rejected while they are received (P3.8).
+    max_upload_mb: int = 50
+    # Uploads in any 24 hours; a cap reached refuses the upload with a message (P3.11).
+    daily_uploads_per_student: int = 10
+    daily_uploads_per_university: int = 300
     # A job that keeps failing for a transient reason stops after this many attempts.
     max_job_attempts: int = 3
     # A job running longer than this belongs to a worker that died, and is requeued.

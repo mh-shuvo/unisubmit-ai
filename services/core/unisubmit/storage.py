@@ -5,13 +5,30 @@ goes through `resolve`, so the same rows work in Docker and natively and a
 stored path can never point outside the root (DEF-042).
 """
 
+import contextlib
+import hashlib
 import shutil
+import tempfile
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import IO, Literal
 
 from .core.config import get_settings
 
 Kind = Literal["guidelines", "submissions", "reports"]
+MB = 1024 * 1024
+
+
+class UploadRejected(ValueError):
+    """The upload was not stored; the message is for the uploader."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoredFile:
+    relative_path: str
+    sha256: str
+    size_bytes: int
 
 
 def root() -> Path:
@@ -57,3 +74,42 @@ def relocate(stored: str, university_id: int, kind: Kind) -> str | None:
     if source.resolve() != target.resolve():
         shutil.move(source, target)
     return relative(target)
+
+
+def save_pdf(source: IO[bytes], university_id: int, kind: Kind, prefix: str) -> StoredFile:
+    """Store an uploaded PDF under a random name, checking its signature and
+    the size limit as it is copied (P3.8). A rejected or interrupted upload
+    leaves no file: it is written to a `.part` file and renamed when complete.
+    """
+    limit = get_settings().max_upload_mb * MB
+    folder = directory(university_id, kind)
+    digest, size = hashlib.sha256(), 0
+    part: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=folder, suffix=".part", delete=False) as target:
+            part = Path(target.name)
+            while chunk := source.read(MB):
+                if size == 0 and not chunk.startswith(b"%PDF-"):
+                    raise UploadRejected("The uploaded file is not a PDF.")
+                size += len(chunk)
+                if size > limit:
+                    raise UploadRejected(
+                        f"The file is larger than the {limit // MB} MB upload limit."
+                    )
+                digest.update(chunk)
+                target.write(chunk)
+        if size == 0:
+            raise UploadRejected("The uploaded file is empty.")
+        final = folder / f"{prefix}_{uuid.uuid4().hex}.pdf"
+        part.replace(final)
+    except BaseException:
+        if part is not None:
+            part.unlink(missing_ok=True)
+        raise
+    return StoredFile(relative(final), digest.hexdigest(), size)
+
+
+def delete(stored: str) -> None:
+    """Remove a stored file; a missing file or a path outside the root is ignored."""
+    with contextlib.suppress(FileNotFoundError):
+        resolve(stored).unlink(missing_ok=True)

@@ -102,7 +102,7 @@ def test_v9_14_database_is_adopted_and_upgraded(scratch_engine: sa.Engine) -> No
     migrate(scratch_engine)
 
     assert schema_state(scratch_engine) == (
-        "0003",
+        "0004",
         [
             "fk_teachers_department_id_departments",
             "fk_teachers_institute_id_institutes",
@@ -157,6 +157,29 @@ def test_v9_14_queue_history_is_copied_into_jobs(scratch_engine: sa.Engine) -> N
             None,
             True,
         ),
+    ]
+
+
+def test_v9_14_statuses_and_stored_json_are_converted(scratch_engine: sa.Engine) -> None:
+    """P3.9 and P3.10: free-text statuses map onto the enums, text onto JSONB."""
+    load_v9_14(scratch_engine, DATA_V9_14)
+
+    migrate(scratch_engine)
+
+    with scratch_engine.connect() as connection:
+        rows = connection.execute(
+            sa.text(
+                "SELECT s.status, s.email_status, v.status, jsonb_typeof(v.validation_json) "
+                "FROM submission_versions v JOIN submissions s ON s.id = v.submission_id "
+                "UNION ALL SELECT status, rag_status, format_profile_status, "
+                "jsonb_typeof(format_profile_json) FROM template_versions ORDER BY 1, 3"
+            )
+        ).all()
+    assert [tuple(row) for row in rows] == [
+        ("Active", "Indexed", "Active", "object"),
+        ("PASSED", "SMTP Not Configured", "PASSED", "array"),
+        ("QUEUED", "Not Sent", "QUEUED", "array"),
+        ("QUEUED", "Not Sent", "VALIDATION FAILED", "array"),
     ]
 
 

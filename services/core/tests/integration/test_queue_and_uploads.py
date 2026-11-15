@@ -140,9 +140,9 @@ class ConcurrentUploadTests(unittest.TestCase):
                 pdf = UploadFile(io.BytesIO(pdf_bytes("Concurrent")), filename="c.pdf")
                 barrier.wait()
                 try:
-                    result = web.save_queue_version(submission, pdf, db)
-                    if inspect.isawaitable(result):
-                        asyncio.run(result)
+                    web.save_queue_version(submission, pdf, db)
+                except web.UploadRefused:
+                    pass  # the loser is told the first upload is still being validated
                 except Exception as exc:  # recorded, asserted below
                     errors.append(exc)
 
@@ -374,7 +374,7 @@ class ValidationHandlerTests(AppTestCase):
 
     def test_final_failure_marks_the_version_failed(self):
         self.handler.on_final_failure(self.payload)
-        self.assertEqual(self.version()[0], "Validation Failed")
+        self.assertEqual(self.version()[0], "VALIDATION FAILED")
 
 
 class EmailHandlerTests(AppTestCase):

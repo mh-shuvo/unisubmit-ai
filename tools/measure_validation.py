@@ -14,6 +14,7 @@ Restructuring plan task P0.11: the measured time sets RAG_VALIDATE_TIMEOUT.
 
 import argparse
 import asyncio
+import copy
 import json
 import platform
 import sys
@@ -58,7 +59,7 @@ def main() -> int:
             None,
         )
         model = args.model or (profile.base_model if profile else settings.ollama_model)
-        fmt_profile = _normalize_profile_severities(json.loads(tv.format_profile_json or "{}"))
+        fmt_profile = _normalize_profile_severities(copy.deepcopy(tv.format_profile_json or {}))
 
         info, inspect_s = timed(inspect_pdf, str(args.pdf))
         started = time.perf_counter()

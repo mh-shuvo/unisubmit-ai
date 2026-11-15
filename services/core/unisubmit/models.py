@@ -22,6 +22,54 @@ from .core.config import get_settings
 from .core.db import Base, str_enum
 
 
+class SubmissionStatus(StrEnum):
+    """A submission's status is the status of its latest version."""
+
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    PASSED = "PASSED"
+    REVISION_REQUIRED = "REVISION REQUIRED"
+    VALIDATION_FAILED = "VALIDATION FAILED"  # the job gave up; the student may upload again
+
+
+IN_PROGRESS = (SubmissionStatus.QUEUED, SubmissionStatus.PROCESSING)
+
+
+class EmailStatus(StrEnum):
+    NOT_SENT = "Not Sent"
+    QUEUED = "Queued"
+    SENT = "Sent"
+    NOT_CONFIGURED = "SMTP Not Configured"
+    FAILED = "Failed"
+
+
+class GuidelineStatus(StrEnum):
+    DRAFT = "Draft"
+    ACTIVE = "Active"
+    ARCHIVED = "Archived"
+
+
+class RagStatus(StrEnum):
+    NOT_INDEXED = "Not Indexed"
+    INDEXED = "Indexed"
+    INDEX_FAILED = "Index Failed"
+
+
+class ProfileStatus(StrEnum):
+    """The parsed guideline rules; only ACTIVE rules take part in validation."""
+
+    NOT_EXTRACTED = "Not Extracted"
+    PARSING_FAILED = "Parsing Failed"
+    REVIEW_REQUIRED = "Parsed - Review Required"
+    NO_RULES = "Parsed - No Explicit Rules Found"
+    ACTIVE = "Active"
+
+
+class AIProfileStatus(StrEnum):
+    DRAFT = "Draft"
+    ACTIVE = "Active"
+
+
 class AdminRole(StrEnum):
     PLATFORM_ADMIN = "PLATFORM_ADMIN"  # the whole installation; belongs to no university
     UNIVERSITY_ADMIN = "UNIVERSITY_ADMIN"  # one university (was SUPER_ADMIN)
@@ -233,12 +281,19 @@ class TemplateVersion(Base):
     additional_rules_pdf_path: Mapped[str] = mapped_column(String(500), default="")
     additional_rules_text: Mapped[str] = mapped_column(Text, default="")
     effective_from: Mapped[str] = mapped_column(String(20), default="")
-    status: Mapped[str] = mapped_column(String(30), default="Draft")
+    status: Mapped[GuidelineStatus] = mapped_column(
+        str_enum(GuidelineStatus), default=GuidelineStatus.DRAFT
+    )
     change_note: Mapped[str] = mapped_column(Text, default="")
     rag_collection: Mapped[str] = mapped_column(String(220), default="")
-    rag_status: Mapped[str] = mapped_column(String(40), default="Not Indexed")
-    format_profile_json: Mapped[str] = mapped_column(Text, default="{}")
-    format_profile_status: Mapped[str] = mapped_column(String(40), default="Not Extracted")
+    rag_status: Mapped[RagStatus] = mapped_column(
+        str_enum(RagStatus), default=RagStatus.NOT_INDEXED
+    )
+    # Never mutate the loaded value in place: change tracking only sees a new object.
+    format_profile_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    format_profile_status: Mapped[ProfileStatus] = mapped_column(
+        str_enum(ProfileStatus), default=ProfileStatus.NOT_EXTRACTED
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     template = relationship("Template", back_populates="versions")
     rules = relationship(
@@ -278,7 +333,9 @@ class AIProfile(Base):
     rag_collection: Mapped[str] = mapped_column(String(180), default="")
     prompt_version: Mapped[str] = mapped_column(String(80), default="v1")
     training_dataset_version: Mapped[str] = mapped_column(String(80), default="")
-    status: Mapped[str] = mapped_column(String(30), default="Draft")
+    status: Mapped[AIProfileStatus] = mapped_column(
+        str_enum(AIProfileStatus), default=AIProfileStatus.DRAFT
+    )
     program = relationship("Program", back_populates="ai_profiles")
 
 
@@ -292,8 +349,12 @@ class Submission(Base):
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"))
     template_version_id: Mapped[int] = mapped_column(ForeignKey("template_versions.id"))
     ai_profile_id: Mapped[int | None] = mapped_column(ForeignKey("ai_profiles.id"), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), default="QUEUED")
-    email_status: Mapped[str] = mapped_column(String(50), default="Not Sent")
+    status: Mapped[SubmissionStatus] = mapped_column(
+        str_enum(SubmissionStatus), default=SubmissionStatus.QUEUED
+    )
+    email_status: Mapped[EmailStatus] = mapped_column(
+        str_enum(EmailStatus), default=EmailStatus.NOT_SENT
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     student = relationship("StudentUser")
     program = relationship("Program")
@@ -311,9 +372,15 @@ class SubmissionVersion(Base):
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"))
     version_no: Mapped[int] = mapped_column(Integer)
     pdf_path: Mapped[str] = mapped_column(String(500))
+    # Empty for versions uploaded before v10.2 (P3.8).
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    page_count: Mapped[int | None] = mapped_column(Integer)
     extracted_text: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(50), default="QUEUED")
-    validation_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[SubmissionStatus] = mapped_column(
+        str_enum(SubmissionStatus), default=SubmissionStatus.QUEUED
+    )
+    validation_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     ai_suggestions: Mapped[str] = mapped_column(Text, default="")
     report_path: Mapped[str] = mapped_column(String(500), default="")
     ai_run_reference: Mapped[str] = mapped_column(String(120), default="")
