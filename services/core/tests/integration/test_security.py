@@ -15,10 +15,9 @@ from unittest.mock import AsyncMock, patch
 import fitz
 import httpx
 import structlog
-from fastapi.routing import APIRoute
 
 from factories import PASSWORD, add_version, pdf_bytes
-from support import AppTestCase, CsrfClient
+from support import AppTestCase, CsrfClient, api_routes
 from unisubmit import handlers
 from unisubmit import main as web
 from unisubmit.models import (
@@ -101,9 +100,8 @@ class CsrfTests(AppTestCase):
         """DEF-041: a form route without the check fails here."""
         unprotected = [
             route.path
-            for route in self.app.routes
-            if isinstance(route, APIRoute)
-            and "POST" in route.methods
+            for route in api_routes(self.app.routes)
+            if "POST" in route.methods
             and verify_csrf not in {dep.call for dep in route.dependant.dependencies}
         ]
         self.assertEqual(unprotected, [])
@@ -294,9 +292,8 @@ class AuditTests(AppTestCase):
         Platform routes record theirs inside `tenancy`."""
         missing = [
             route.endpoint.__name__
-            for route in self.app.routes
-            if isinstance(route, APIRoute)
-            and "POST" in route.methods
+            for route in api_routes(self.app.routes)
+            if "POST" in route.methods
             and route.path.startswith("/admin")
             and route.endpoint.__name__ not in self.ADMIN_WRITES_WITHOUT_AUDIT
             and "audit.record(" not in inspect.getsource(route.endpoint)

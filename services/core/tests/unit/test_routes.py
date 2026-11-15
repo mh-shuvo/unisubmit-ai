@@ -1,0 +1,70 @@
+"""Phase 5 moves every route out of `main.py`; the URLs must not change."""
+
+from support import api_routes
+from unisubmit.main import create_app
+
+ROUTES = {
+    ("GET", "/"),
+    ("GET", "/admin"),
+    ("GET", "/admin/admins"),
+    ("GET", "/admin/ai"),
+    ("GET", "/admin/configuration"),
+    ("GET", "/admin/login"),
+    ("GET", "/admin/programs"),
+    ("GET", "/admin/queue"),
+    ("GET", "/admin/structure"),
+    ("GET", "/admin/submissions"),
+    ("GET", "/admin/supervisors"),
+    ("GET", "/admin/template-version/{version_id}"),
+    ("GET", "/api/faculty/{faculty_id}/departments"),
+    ("GET", "/api/student/options/{program_id}"),
+    ("GET", "/files/report/{submission_id}/{version_id}/{run_token}"),
+    ("GET", "/files/report/{version_id}"),
+    ("GET", "/files/submission/{version_id}"),
+    ("GET", "/guidelines"),
+    ("GET", "/guidelines/{version_id}/download"),
+    ("GET", "/how-it-works"),
+    ("GET", "/platform/universities"),
+    ("GET", "/student/dashboard"),
+    ("GET", "/student/login"),
+    ("GET", "/student/profile"),
+    ("GET", "/student/register"),
+    ("GET", "/submission/{submission_id}"),
+    ("GET", "/submission/{submission_id}/report/{version_id}"),
+    ("GET", "/submit"),
+    ("GET", "/u/{slug}/guidelines"),
+    ("GET", "/u/{slug}/register"),
+    ("POST", "/admin/admins"),
+    ("POST", "/admin/configuration"),
+    ("POST", "/admin/configuration/{template_id}/version"),
+    ("POST", "/admin/departments"),
+    ("POST", "/admin/faculties"),
+    ("POST", "/admin/institutes"),
+    ("POST", "/admin/login"),
+    ("POST", "/admin/logout"),
+    ("POST", "/admin/password"),
+    ("POST", "/admin/programs"),
+    ("POST", "/admin/supervisors"),
+    ("POST", "/admin/template-version/{version_id}/activate-profile"),
+    ("POST", "/admin/template-version/{version_id}/index"),
+    ("POST", "/admin/template-version/{version_id}/review-rules"),
+    ("POST", "/admin/template-version/{version_id}/rules"),
+    ("POST", "/admin/template-version/{version_id}/semantic-rules"),
+    ("POST", "/admin/template-version/{version_id}/semantic-rules/{semantic_id}/delete"),
+    ("POST", "/admin/template-version/{version_id}/semantic-rules/{semantic_id}/update"),
+    ("POST", "/platform/universities"),
+    ("POST", "/platform/universities/{university_id}/active"),
+    ("POST", "/platform/universities/{university_id}/rename"),
+    ("POST", "/student/login"),
+    ("POST", "/student/logout"),
+    ("POST", "/student/password"),
+    ("POST", "/submission/{submission_id}/resubmit"),
+    ("POST", "/submit"),
+    ("POST", "/u/{slug}/register"),
+}
+
+
+def test_the_app_serves_exactly_the_known_routes() -> None:
+    app = create_app()
+    served = {(method, route.path) for route in api_routes(app.routes) for method in route.methods}
+    assert served == ROUTES

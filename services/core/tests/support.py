@@ -7,17 +7,30 @@ the code under test become savepoints (see `conftest.py`).
 import os
 import re
 import unittest
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from factories import PASSWORD, build_world
 from unisubmit import main as web
 from unisubmit.core.config import get_settings
+
+
+def api_routes(routes: Iterable[object]) -> Iterator[APIRoute]:
+    """Every endpoint, including those of included routers, which FastAPI 0.16x
+    keeps nested instead of copying into `app.routes`."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif (router := getattr(route, "original_router", None)) is not None:
+            yield from api_routes(router.routes)
+
 
 CSRF_INPUT = re.compile(r'name="csrf_token" value="([^"]+)"')
 
