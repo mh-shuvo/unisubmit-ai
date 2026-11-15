@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from contextvars import ContextVar
 from functools import wraps
 from urllib.parse import quote
 
@@ -47,6 +48,31 @@ app = FastAPI(
     version=APP_VERSION,
     dependencies=[Depends(require_service_token)],
 )
+
+# The core sends the request ID of the upload or job that caused each call; it
+# prefixes this service's log lines, so one ID traces a validation through both.
+REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="-")
+SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = f"[{REQUEST_ID.get()}] {record.msg}"
+        return True
+
+
+logger.addFilter(_RequestIdFilter())
+
+
+@app.middleware("http")
+async def bind_request_id(request: Request, call_next):
+    supplied = request.headers.get("x-request-id", "")
+    token = REQUEST_ID.set(supplied if SAFE_REQUEST_ID.match(supplied) else "-")
+    try:
+        return await call_next(request)
+    finally:
+        REQUEST_ID.reset(token)
+
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 DEFAULT_LLM_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:32b")

@@ -251,7 +251,7 @@ def _rules(profile):
     if isinstance(profile, str):
         try:
             profile = json.loads(profile)
-        except Exception:
+        except ValueError:
             return []
     if not isinstance(profile, dict):
         return []
@@ -783,7 +783,7 @@ def validate_format_profile(profile, info):
     if isinstance(profile, str):
         try:
             profile = json.loads(profile)
-        except Exception:
+        except ValueError:
             return []
     rules = _rules(profile)
     out = []
@@ -1589,7 +1589,7 @@ def validate_all_profile_rules(profile, info):
     if isinstance(profile, str):
         try:
             profile = json.loads(profile)
-        except Exception:
+        except ValueError:
             return []
     rules = _rules(profile)
     rows = []

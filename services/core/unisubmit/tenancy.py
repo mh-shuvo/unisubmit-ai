@@ -9,6 +9,7 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import audit
 from .models import AdminRole, AdminUser, University
 from .security import hash_password
 
@@ -54,6 +55,8 @@ def create_platform_admin(db: Session, name: str, email: str, password: str) -> 
         name=name, email=email, password_hash=hash_password(password), role=AdminRole.PLATFORM_ADMIN
     )
     db.add(admin)
+    db.flush()
+    audit.record(db, None, "platform_admin.create", f"admin:{admin.id}", email=email)
     db.commit()
     return admin
 
@@ -66,6 +69,7 @@ def create_university(
     admin_name: str,
     admin_email: str,
     admin_password: str,
+    actor: AdminUser | None = None,
 ) -> University:
     """A university and its first University Admin, in one transaction."""
     name, slug, admin_email = name.strip(), slug.strip().lower(), admin_email.strip().lower()
@@ -84,27 +88,51 @@ def create_university(
             university_id=university.id,
         )
     )
+    audit.record(
+        db,
+        actor,
+        "university.create",
+        f"university:{university.id}",
+        university_id=university.id,
+        name=name,
+        admin_email=admin_email,
+    )
     db.commit()
     return university
 
 
-def rename_university(db: Session, university_id: int, name: str, slug: str) -> University:
+def rename_university(
+    db: Session, university_id: int, name: str, slug: str, actor: AdminUser | None = None
+) -> University:
     university = db.get(University, university_id)
     if university is None:
         raise TenancyError("No such university.")
     name, slug = name.strip(), slug.strip().lower()
     _check_name_and_slug(db, name, slug, university_id)
     university.name, university.slug = name, slug
+    audit.record(
+        db,
+        actor,
+        "university.rename",
+        f"university:{university.id}",
+        university_id=university.id,
+        name=name,
+        slug=slug,
+    )
     db.commit()
     return university
 
 
-def set_university_active(db: Session, university_id: int, active: bool) -> University:
+def set_university_active(
+    db: Session, university_id: int, active: bool, actor: AdminUser | None = None
+) -> University:
     """Users of an inactive university are signed out on their next request."""
     university = db.get(University, university_id)
     if university is None:
         raise TenancyError("No such university.")
     university.is_active = active
+    action = "university.activate" if active else "university.deactivate"
+    audit.record(db, actor, action, f"university:{university.id}", university_id=university.id)
     db.commit()
     return university
 

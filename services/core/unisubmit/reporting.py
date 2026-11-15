@@ -142,7 +142,7 @@ def build_validation_report(path, submission, version, results, suggestions):
     if getattr(version, "created_at", None):
         try:
             submitted = version.created_at.strftime("%d %b %Y, %I:%M %p")
-        except Exception:
+        except (AttributeError, ValueError):
             submitted = str(version.created_at)
 
     meta = [

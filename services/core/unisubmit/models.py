@@ -186,6 +186,11 @@ class AdminUser(Base):
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Raised on a password change: sessions holding an older value end (P4.3).
+    auth_epoch: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Ten wrong passwords in a row lock the account for 15 minutes (P4.4).
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     university = relationship("University")
     department = relationship("Department")
@@ -210,6 +215,11 @@ class StudentUser(Base):
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Raised on a password change: sessions holding an older value end (P4.3).
+    auth_epoch: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Ten wrong passwords in a row lock the account for 15 minutes (P4.4).
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     university = relationship("University")
     department = relationship("Department")
@@ -441,6 +451,28 @@ class Job(Base):
     last_error: Mapped[str | None] = mapped_column(Text)  # for admins, never shown to students
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuditEvent(Base):
+    """A permanent record of an admin action (P4.8); logs rotate, this does not.
+
+    `university_id` is the university acted in or on, empty for actions that
+    concern the whole installation; `admin_id` is empty for the CLI.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_university_created", "university_id", "created_at"),)
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int | None] = mapped_column(ForeignKey("universities.id"))
+    admin_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id"))
+    action: Mapped[str] = mapped_column(String(60))  # e.g. "guideline.activate_profile"
+    subject: Mapped[str] = mapped_column(String(100))  # e.g. "template_version:7"
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    admin = relationship("AdminUser")
 
 
 class AIJob(Base):

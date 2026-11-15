@@ -17,6 +17,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, aliased
 
+from .core.logging import current_request_id
 from .models import ACTIVE_JOB_STATUSES, Job, JobStatus, JobType, University
 
 ERROR_LIMIT = 2000
@@ -66,11 +67,14 @@ def enqueue(
     university_id: int,
     priority: int = 100,
 ) -> None:
+    """The request that queues a job lends it its ID, so the job's log lines and
+    its calls to the AI service can be traced back to the upload (P4.7)."""
+    request_id = current_request_id()
     session.add(
         Job(
             type=job_type,
             subject_key=subject_key,
-            payload=payload,
+            payload={**payload, "request_id": request_id} if request_id else payload,
             university_id=university_id,
             priority=priority,
         )

@@ -16,6 +16,8 @@ dependencies = [
   "httpx>=0.28",
   "pymupdf>=1.25.5,<2",           # 2.x exists: upgrade separately, behind the rule tests
   "reportlab>=4.4",
+  "pwdlib[argon2]>=0.4.2",
+  "structlog>=26.1.0",
 ]
 
 [project.scripts]

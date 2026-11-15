@@ -4,8 +4,9 @@ import os
 import httpx
 
 from .core.config import get_settings
+from .core.logging import REQUEST_ID_HEADER, current_request_id
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("unisubmit.ai_client")
 
 # Semantic validation runs one local-LLM call per batch of rules, so the budget
 # scales with the size of the guideline's rule set rather than a single request.
@@ -13,8 +14,12 @@ RAG_VALIDATE_TIMEOUT = float(os.getenv("RAG_VALIDATE_TIMEOUT", "1800"))
 
 
 def _auth() -> dict:
-    """The AI service rejects calls without the shared token (DEF-029)."""
-    return {"Authorization": f"Bearer {get_settings().ai_service_token.get_secret_value()}"}
+    """The AI service rejects calls without the shared token (DEF-029). The
+    request ID lets its log lines be matched with ours (P4.7)."""
+    headers = {"Authorization": f"Bearer {get_settings().ai_service_token.get_secret_value()}"}
+    if request_id := current_request_id():
+        headers[REQUEST_ID_HEADER] = request_id
+    return headers
 
 
 def health(service_url: str) -> dict:
@@ -24,7 +29,7 @@ def health(service_url: str) -> dict:
             r = c.get(service_url.rstrip("/") + "/health")
             r.raise_for_status()
             return {"online": True, "data": r.json()}
-    except Exception as e:
+    except (httpx.HTTPError, ValueError) as e:
         return {"online": False, "error": str(e)}
 
 
@@ -90,7 +95,7 @@ async def extract_format_profile(service_url: str, payload: dict):
             r = await c.post(service_url.rstrip("/") + "/format/profile", json=payload)
             r.raise_for_status()
             return r.json()
-    except Exception as e:
+    except (httpx.HTTPError, ValueError) as e:
         return {"status": "error", "detail": str(e)}
 
 

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     smtp_password: SecretStr = SecretStr("")
     smtp_from: str = "unisubmit@example.edu"
     smtp_use_tls: bool = True
+    # Production serves HTTPS only: send the session cookie over HTTPS only (P4.3).
+    session_https_only: bool = False
+    # One JSON object per log line, for a log collector; readable lines otherwise (P4.7).
+    log_json: bool = False
     # Uploads larger than this are rejected while they are received (P3.8).
     max_upload_mb: int = 50
     # Uploads in any 24 hours; a cap reached refuses the upload with a message (P3.11).

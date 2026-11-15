@@ -5,19 +5,23 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import structlog
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import queries, queue, storage, tenancy
+from . import audit, queries, queue, storage, tenancy
 from .ai_service_client import health as ai_health
 from .core.config import get_settings
 from .core.db import DbSession, create_db_engine, make_session_factory
+from .core.errors import register_error_handlers
+from .core.logging import RequestIdMiddleware, configure_logging
 from .models import (
     ACTIVE_JOB_STATUSES,
     IN_PROGRESS,
@@ -45,12 +49,24 @@ from .models import (
 from .pdf_utils import PDFError, inspect_pdf
 from .report_parser import inline_markdown_html, parse_ai_report
 from .reporting import build_validation_report
-from .security import hash_password, verify_password
+from .security import (
+    Login,
+    check_login,
+    csrf_field,
+    hash_password,
+    verify_csrf,
+    verify_password,
+)
 
 PACKAGE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 templates.env.globals["render_md"] = inline_markdown_html
-router = APIRouter()
+templates.env.globals["csrf_field"] = csrf_field
+# Every POST carries the session's CSRF token (P4.2, DEF-041).
+router = APIRouter(dependencies=[Depends(verify_csrf)])
+security_log = structlog.get_logger("unisubmit.security")
+SESSION_HOURS = 8
+MIN_STUDENT_PASSWORD = 8
 
 
 # ---------- helpers ----------
@@ -101,12 +117,12 @@ def _dedupe_semantic_requirements(profile):
             for x in r.get("source_pages") or []:
                 try:
                     pages.append(int(x))
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             try:
                 if r.get("source_page") is not None:
                     pages.append(int(r.get("source_page")))
-            except Exception:
+            except (TypeError, ValueError):
                 pass
             r["source_pages"] = sorted(set(pages))
             if r["source_pages"] and not r.get("source_page"):
@@ -128,12 +144,12 @@ def _dedupe_semantic_requirements(profile):
             for x in r.get("source_pages") or []:
                 try:
                     pages.add(int(x))
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             try:
                 if r.get("source_page") is not None:
                     pages.add(int(r.get("source_page")))
-            except Exception:
+            except (TypeError, ValueError):
                 pass
             base["source_pages"] = sorted(pages)
             if base["source_pages"]:
@@ -245,11 +261,23 @@ def university_inactive(user) -> bool:
     return user.university is not None and not user.university.is_active
 
 
+def signed_out(request: Request, user) -> bool:
+    """A session ends when its user or university is deactivated, or when the
+    user's password changed after it began (P4.3)."""
+    gone = (
+        user is None
+        or not user.active
+        or university_inactive(user)
+        or request.session.get("auth_epoch") != user.auth_epoch
+    )
+    if gone and user is not None:
+        request.session.clear()
+    return gone
+
+
 def require_admin(request: Request, db: Session):
     u = admin_user(request, db)
-    if u and university_inactive(u):
-        request.session.clear()
-    if not u or not u.active or university_inactive(u):
+    if signed_out(request, u):
         raise HTTPException(401, "Admin login required")
     return u
 
@@ -263,11 +291,56 @@ def require_role(request: Request, db: Session, role: AdminRole):
 
 def require_student(request: Request, db: Session):
     u = student_user(request, db)
-    if u and university_inactive(u):
-        request.session.clear()
-    if not u or not u.active or university_inactive(u):
+    if signed_out(request, u):
         raise HTTPException(401, "Student login required")
     return u
+
+
+def sign_in(request: Request, db: Session, account, password: str, key: str, page: str):
+    """Check a login and start the session; returns a redirect back to the
+    login page when it fails. Counters and an upgraded hash are committed
+    either way (P4.1, P4.4)."""
+    outcome = check_login(account, password)
+    db.commit()
+    kind = key.removesuffix("_id")
+    if outcome is Login.LOCKED:
+        security_log.warning("login.locked", account=kind, user_id=account.id)
+        error = "Too many failed attempts. Try again in 15 minutes."
+        return RedirectResponse(flash_url(page, error=error), 303)
+    if outcome is Login.WRONG:
+        security_log.warning("login.failed", account=kind, user_id=getattr(account, "id", None))
+        return RedirectResponse(flash_url(page, error="Invalid email or password"), 303)
+    if university_inactive(account):
+        security_log.warning("login.university_inactive", account=kind, user_id=account.id)
+        error = "Your university's account is deactivated"
+        return RedirectResponse(flash_url(page, error=error), 303)
+    request.session.clear()  # a new session, and a new CSRF token, at every login
+    request.session[key] = account.id
+    request.session["auth_epoch"] = account.auth_epoch
+    security_log.info("login.succeeded", account=kind, user_id=account.id)
+    return None
+
+
+def change_password(request: Request, db: Session, account, current: str, new: str, page: str):
+    """Ends every other session of the account; this one stays signed in."""
+    if not verify_password(current, account.password_hash):
+        return RedirectResponse(flash_url(page, error="The current password is wrong"), 303)
+    minimum = (
+        MIN_STUDENT_PASSWORD if isinstance(account, StudentUser) else tenancy.MIN_ADMIN_PASSWORD
+    )
+    if len(new) < minimum:
+        error = f"The new password must be at least {minimum} characters"
+        return RedirectResponse(flash_url(page, error=error), 303)
+    account.password_hash = hash_password(new)
+    account.auth_epoch += 1
+    if isinstance(account, AdminUser):
+        audit.record(db, account, "account.change_password", f"admin:{account.id}")
+    db.commit()
+    request.session["auth_epoch"] = account.auth_epoch
+    security_log.info("password.changed", user_id=account.id)
+    return RedirectResponse(
+        flash_url(page, message="Password changed; your other sessions are signed out"), 303
+    )
 
 
 def same_unit(program, u):
@@ -429,21 +502,25 @@ def student_login(
         .filter(StudentUser.email == email.strip().lower(), StudentUser.active == True)
         .first()
     )
-    if not s or not verify_password(password, s.password_hash):
-        return RedirectResponse(flash_url("/student/login", error="Invalid email or password"), 303)
-    if university_inactive(s):
-        return RedirectResponse(
-            flash_url("/student/login", error="Your university's account is deactivated"), 303
-        )
-    request.session.clear()
-    request.session["student_id"] = s.id
-    return RedirectResponse("/student/dashboard", 303)
+    refused = sign_in(request, db, s, password, "student_id", "/student/login")
+    return refused or RedirectResponse("/student/dashboard", 303)
 
 
-@router.get("/student/logout")
+@router.post("/student/logout")
 def student_logout(request: Request):
     request.session.clear()
     return RedirectResponse("/", 303)
+
+
+@router.post("/student/password")
+def student_change_password(
+    request: Request,
+    db: DbSession,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+):
+    s = require_student(request, db)
+    return change_password(request, db, s, current_password, new_password, "/student/profile")
 
 
 @router.get("/student/dashboard", response_class=HTMLResponse)
@@ -472,7 +549,14 @@ def student_dashboard(request: Request, db: DbSession):
 def student_profile(request: Request, db: DbSession):
     s = require_student(request, db)
     return templates.TemplateResponse(
-        request, "student_profile.html", {"request": request, "student": s}
+        request,
+        "student_profile.html",
+        {
+            "request": request,
+            "student": s,
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
     )
 
 
@@ -498,21 +582,26 @@ def admin_login(
         .filter(AdminUser.email == email.strip().lower(), AdminUser.active == True)
         .first()
     )
-    if not u or not verify_password(password, u.password_hash):
-        return RedirectResponse(flash_url("/admin/login", error="Invalid admin credentials"), 303)
-    if university_inactive(u):
-        return RedirectResponse(
-            flash_url("/admin/login", error="Your university's account is deactivated"), 303
-        )
-    request.session.clear()
-    request.session["admin_id"] = u.id
-    return RedirectResponse("/admin", 303)
+    return sign_in(request, db, u, password, "admin_id", "/admin/login") or RedirectResponse(
+        "/admin", 303
+    )
 
 
-@router.get("/admin/logout")
+@router.post("/admin/logout")
 def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse("/", 303)
+
+
+@router.post("/admin/password")
+def admin_change_password(
+    request: Request,
+    db: DbSession,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+):
+    u = require_admin(request, db)
+    return change_password(request, db, u, current_password, new_password, "/admin")
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -543,7 +632,15 @@ def admin_dashboard(request: Request, db: DbSession):
             "queue": sum(1 for x in rows if x.status in IN_PROGRESS),
         }
     return templates.TemplateResponse(
-        request, "admin_dashboard.html", {"request": request, "admin": u, "metrics": metrics}
+        request,
+        "admin_dashboard.html",
+        {
+            "request": request,
+            "admin": u,
+            "metrics": metrics,
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
     )
 
 
@@ -574,7 +671,7 @@ def platform_create_university(
     admin_email: str = Form(...),
     admin_password: str = Form(...),
 ):
-    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    u = require_role(request, db, AdminRole.PLATFORM_ADMIN)
     try:
         tenancy.create_university(
             db,
@@ -583,6 +680,7 @@ def platform_create_university(
             admin_name=admin_name,
             admin_email=admin_email,
             admin_password=admin_password,
+            actor=u,
         )
     except tenancy.TenancyError as exc:
         db.rollback()
@@ -600,9 +698,9 @@ def platform_rename_university(
     name: str = Form(...),
     slug: str = Form(...),
 ):
-    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    u = require_role(request, db, AdminRole.PLATFORM_ADMIN)
     try:
-        tenancy.rename_university(db, university_id, name, slug)
+        tenancy.rename_university(db, university_id, name, slug, actor=u)
     except tenancy.TenancyError as exc:
         db.rollback()
         return RedirectResponse(flash_url("/platform/universities", error=str(exc)), 303)
@@ -616,9 +714,9 @@ def platform_set_university_active(
     db: DbSession,
     active: bool = Form(...),
 ):
-    require_role(request, db, AdminRole.PLATFORM_ADMIN)
+    u = require_role(request, db, AdminRole.PLATFORM_ADMIN)
     try:
-        university = tenancy.set_university_active(db, university_id, active)
+        university = tenancy.set_university_active(db, university_id, active, actor=u)
     except tenancy.TenancyError as exc:
         return RedirectResponse(flash_url("/platform/universities", error=str(exc)), 303)
     state = "activated" if university.is_active else "deactivated; its users are signed out"
@@ -672,10 +770,13 @@ def add_faculty(
     code: str = Form(...),
 ):
     u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
-    db.add(Faculty(name=name.strip(), code=code.strip().upper(), university_id=u.university_id))
+    faculty = Faculty(name=name.strip(), code=code.strip().upper(), university_id=u.university_id)
+    db.add(faculty)
     try:
+        db.flush()
+        audit.record(db, u, "faculty.create", f"faculty:{faculty.id}", code=faculty.code)
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return RedirectResponse(
             flash_url("/admin/structure", error="Faculty name/code already exists"), 303
@@ -691,10 +792,15 @@ def add_institute(
     code: str = Form(...),
 ):
     u = require_role(request, db, AdminRole.UNIVERSITY_ADMIN)
-    db.add(Institute(name=name.strip(), code=code.strip().upper(), university_id=u.university_id))
+    institute = Institute(
+        name=name.strip(), code=code.strip().upper(), university_id=u.university_id
+    )
+    db.add(institute)
     try:
+        db.flush()
+        audit.record(db, u, "institute.create", f"institute:{institute.id}", code=institute.code)
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return RedirectResponse(
             flash_url("/admin/structure", error="Institute name/code already exists"),
@@ -715,10 +821,15 @@ def add_department(
     faculty = db.get(Faculty, faculty_id)
     if not faculty or faculty.university_id != u.university_id:
         raise HTTPException(404)
-    db.add(Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty.id))
+    department = Department(name=name.strip(), code=code.strip().upper(), faculty_id=faculty.id)
+    db.add(department)
     try:
+        db.flush()
+        audit.record(
+            db, u, "department.create", f"department:{department.id}", code=department.code
+        )
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return RedirectResponse(
             flash_url("/admin/structure", error="Department name/code already exists"),
@@ -765,20 +876,24 @@ def create_unit_admin(
     )
     if unit_id not in {unit.id for unit in units}:
         raise HTTPException(404)
-    db.add(
-        AdminUser(
-            name=name.strip(),
-            email=email.strip().lower(),
-            password_hash=hash_password(password),
-            role=AdminRole.UNIT_ADMIN,
-            university_id=u.university_id,
-            department_id=unit_id if unit_type == "department" else None,
-            institute_id=unit_id if unit_type == "institute" else None,
-        )
+    if len(password) < tenancy.MIN_ADMIN_PASSWORD:
+        error = f"The password must be at least {tenancy.MIN_ADMIN_PASSWORD} characters"
+        return RedirectResponse(flash_url("/admin/admins", error=error), 303)
+    unit_admin = AdminUser(
+        name=name.strip(),
+        email=email.strip().lower(),
+        password_hash=hash_password(password),
+        role=AdminRole.UNIT_ADMIN,
+        university_id=u.university_id,
+        department_id=unit_id if unit_type == "department" else None,
+        institute_id=unit_id if unit_type == "institute" else None,
     )
+    db.add(unit_admin)
     try:
+        db.flush()
+        audit.record(db, u, "unit_admin.create", f"admin:{unit_admin.id}", email=unit_admin.email)
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return RedirectResponse(flash_url("/admin/admins", error="Admin email already exists"), 303)
     return RedirectResponse(
@@ -815,15 +930,16 @@ def unit_add_program(
     u = require_admin(request, db)
     if u.role != AdminRole.UNIT_ADMIN:
         raise HTTPException(403)
-    db.add(
-        Program(
-            name=name.strip(),
-            code=code.strip().upper(),
-            level=level,
-            department_id=u.department_id,
-            institute_id=u.institute_id,
-        )
+    program = Program(
+        name=name.strip(),
+        code=code.strip().upper(),
+        level=level,
+        department_id=u.department_id,
+        institute_id=u.institute_id,
     )
+    db.add(program)
+    db.flush()
+    audit.record(db, u, "program.create", f"program:{program.id}", code=program.code)
     db.commit()
     return RedirectResponse(flash_url("/admin/programs", message="Program added"), 303)
 
@@ -860,19 +976,20 @@ def unit_add_supervisor(
     allowed = {"Professor", "Associate Professor", "Assistant Professor", "Lecturer"}
     if designation not in allowed:
         raise HTTPException(400)
-    db.add(
-        Teacher(
-            name=name.strip(),
-            designation=designation,
-            email=email.strip().lower(),
-            university_id=u.university_id,
-            department_id=u.department_id,
-            institute_id=u.institute_id,
-        )
+    teacher = Teacher(
+        name=name.strip(),
+        designation=designation,
+        email=email.strip().lower(),
+        university_id=u.university_id,
+        department_id=u.department_id,
+        institute_id=u.institute_id,
     )
+    db.add(teacher)
     try:
+        db.flush()
+        audit.record(db, u, "supervisor.create", f"teacher:{teacher.id}", email=teacher.email)
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         return RedirectResponse(flash_url("/admin/supervisors", error="Email already exists"), 303)
     return RedirectResponse(flash_url("/admin/supervisors", message="Supervisor added"), 303)
@@ -921,12 +1038,11 @@ def add_configuration(
         .first()
     )
     if not t:
-        db.add(
-            Template(
-                program_id=program_id,
-                submission_type=submission_type,
-                title=title.strip(),
-            )
+        t = Template(program_id=program_id, submission_type=submission_type, title=title.strip())
+        db.add(t)
+        db.flush()
+        audit.record(
+            db, u, "configuration.create", f"template:{t.id}", submission_type=submission_type
         )
         db.commit()
     return RedirectResponse(
@@ -981,8 +1097,7 @@ def add_version(
         additional_rules_text=add_text,
     )
     db.add(tv)
-    db.commit()
-    db.refresh(tv)
+    db.flush()
     # Useful base restriction only; academic requirements come from uploaded documents via RAG.
     db.add(
         ValidationRule(
@@ -994,6 +1109,9 @@ def add_version(
             expected="true",
             source_text="System restriction",
         )
+    )
+    audit.record(
+        db, u, "guideline.upload", f"template_version:{tv.id}", version=tv.version, status=status
     )
     db.commit()
     return RedirectResponse(f"/admin/template-version/{tv.id}", 303)
@@ -1076,8 +1194,8 @@ def review_guideline_rules(
             r["mandatory"] = val == "Mandatory"
             r["enabled"] = val != "Ignore"
     if changes:
-        audit = profile.setdefault("review_audit", [])
-        audit.append(
+        review_log = profile.setdefault("review_audit", [])
+        review_log.append(
             {
                 "changed_at": datetime.utcnow().isoformat() + "Z",
                 "admin_id": u.id,
@@ -1085,9 +1203,12 @@ def review_guideline_rules(
                 "changes": changes,
             }
         )
-        profile["review_audit"] = audit[-100:]
+        profile["review_audit"] = review_log[-100:]
         tv.format_profile_json = profile
         tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
+        audit.record(
+            db, u, "guideline.review_rules", f"template_version:{tv.id}", changes=len(changes)
+        )
         db.commit()
         return RedirectResponse(
             flash_url(
@@ -1160,6 +1281,9 @@ def add_manual_semantic_rule(
     after = len(profile.get("semantic_requirements") or [])
     tv.format_profile_json = profile
     tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
+    audit.record(
+        db, u, "guideline.add_rule", f"template_version:{tv.id}", semantic_id=new["semantic_id"]
+    )
     db.commit()
     msg = (
         "Manual semantic rule added."
@@ -1219,6 +1343,9 @@ def update_manual_semantic_rule(
     profile = _dedupe_semantic_requirements(profile)
     tv.format_profile_json = profile
     tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
+    audit.record(
+        db, u, "guideline.update_rule", f"template_version:{tv.id}", semantic_id=semantic_id
+    )
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1250,6 +1377,9 @@ def delete_manual_semantic_rule(version_id: int, semantic_id: str, request: Requ
     profile["semantic_requirements"] = new
     tv.format_profile_json = profile
     tv.format_profile_status = ProfileStatus.REVIEW_REQUIRED
+    audit.record(
+        db, u, "guideline.delete_rule", f"template_version:{tv.id}", semantic_id=semantic_id
+    )
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1287,6 +1417,7 @@ def activate_guideline_profile(version_id: int, request: Request, db: DbSession)
             303,
         )
     tv.format_profile_status = ProfileStatus.ACTIVE
+    audit.record(db, u, "guideline.activate_profile", f"template_version:{tv.id}")
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1324,6 +1455,9 @@ def add_restriction(
             source_text="Admin-defined additional restriction",
         )
     )
+    audit.record(
+        db, u, "guideline.add_restriction", f"template_version:{tv.id}", validator=validator
+    )
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1359,6 +1493,7 @@ def index_guideline(version_id: int, request: Request, db: DbSession):
         {"template_version_id": tv.id},
         university_id=u.university_id,
     )
+    audit.record(db, u, "guideline.queue_parse", subject)
     db.commit()
     return RedirectResponse(
         flash_url(
@@ -1831,20 +1966,6 @@ def semantic_validation_payload(program, tv, fmt_profile, student_text, base_mod
     }
 
 
-async def friendly_http_error(request: Request, exc: HTTPException):
-    """Browser-friendly auth redirects."""
-    if exc.status_code == 401:
-        if request.url.path.startswith("/admin"):
-            return RedirectResponse("/admin/login", 303)
-        if (
-            request.url.path.startswith("/student")
-            or request.url.path.startswith("/submit")
-            or request.url.path.startswith("/submission")
-        ):
-            return RedirectResponse("/student/login", 303)
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-
-
 def create_app() -> FastAPI:
     """Run with `uvicorn unisubmit.main:create_app --factory`.
 
@@ -1853,6 +1974,7 @@ def create_app() -> FastAPI:
     (DEF-028). Validation jobs run in `python -m unisubmit.worker` (DEF-024).
     """
     settings = get_settings()
+    configure_logging(json=settings.log_json)
     engine = create_db_engine(str(settings.database_url))
 
     @asynccontextmanager
@@ -1865,10 +1987,12 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.secret_key.get_secret_value(),
-        max_age=60 * 60 * 12,
+        max_age=SESSION_HOURS * 60 * 60,
         same_site="lax",
+        https_only=settings.session_https_only,
     )
-    app.add_exception_handler(HTTPException, friendly_http_error)
+    app.add_middleware(RequestIdMiddleware)  # added last, so it runs first
+    register_error_handlers(app, templates)
     app.include_router(router)
     app.mount("/static", StaticFiles(directory=str(PACKAGE / "static")), name="static")
     templates.env.globals["default_llm_model"] = settings.ollama_model

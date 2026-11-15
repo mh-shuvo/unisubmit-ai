@@ -24,11 +24,13 @@ from collections.abc import Mapping
 from datetime import timedelta
 
 import sqlalchemy as sa
+import structlog
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import handlers, queue
 from .core.config import Settings, get_settings
 from .core.db import create_db_engine, make_session_factory
+from .core.logging import configure_logging
 from .handlers import JobHandler
 from .models import Job, JobType
 
@@ -72,6 +74,10 @@ async def run_once(
     if job is None:
         return False
     handler = handlers[job.type]
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        job_id=job.id, request_id=job.payload.get("request_id") or f"job-{job.id}"
+    )
     try:
         follow_ups = await handler.run(job.payload)
     except asyncio.CancelledError:
@@ -133,16 +139,14 @@ async def wait_for_schema(engine: sa.Engine) -> None:
 
 
 async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    settings = get_settings()
+    configure_logging(json=settings.log_json)
     task = asyncio.current_task()
     # Docker stops containers with SIGTERM; Ctrl+C is handled by asyncio.run.
     # Windows event loops have no signal handlers.
     if task is not None:
         with contextlib.suppress(NotImplementedError):
             asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
-    settings = get_settings()
     engine = create_db_engine(str(settings.database_url))
     try:
         await wait_for_schema(engine)

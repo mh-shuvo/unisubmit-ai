@@ -9,7 +9,7 @@
       <a href="/student/dashboard" class="{% if request.url.path=='/student/dashboard' %}active{% endif %}">Dashboard</a>
       <a href="/submit" class="{% if request.url.path=='/submit' %}active{% endif %}">New Submission</a>
       <a href="/student/profile" class="{% if request.url.path=='/student/profile' %}active{% endif %}">Profile</a>
-      <a href="/student/logout" class="nav-logout">Logout</a>
+      <form method="post" action="/student/logout" class="inline-form">{{ csrf_field(request) }}<button class="nav-logout">Logout</button></form>
     </nav>
   {% elif admin_signed_in %}
     <a class="brand" href="/admin"><span class="brandmark">U</span><span>UniSubmit AI<small>Administration workspace</small></span></a>
@@ -17,7 +17,7 @@
     <nav class="private-nav">
       <a href="/admin" class="{% if request.url.path=='/admin' %}active{% endif %}">Dashboard</a>
       <span class="role-chip">Admin session</span>
-      <a href="/admin/logout" class="nav-logout">Logout</a>
+      <form method="post" action="/admin/logout" class="inline-form">{{ csrf_field(request) }}<button class="nav-logout">Logout</button></form>
     </nav>
   {% else %}
     <a class="brand" href="/"><span class="brandmark">U</span><span>UniSubmit AI<small>Academic submission intelligence</small></span></a>

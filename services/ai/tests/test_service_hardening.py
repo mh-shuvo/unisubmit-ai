@@ -276,3 +276,33 @@ class EmbeddingDeviceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestIdTests(unittest.TestCase):
+    """P4.7: the core's request ID prefixes this service's log lines."""
+
+    def collections_logging(self, headers):
+        def logs_and_answers():
+            service.logger.warning("listing collections")
+            return MagicMock(collections=[])
+
+        qdrant = MagicMock(get_collections=MagicMock(side_effect=logs_and_answers))
+        with (
+            patch.object(service, "AI_SERVICE_TOKEN", TOKEN),
+            patch.object(service, "qdrant_client", qdrant),
+            patch.object(service, "qdrant_status", "ready"),
+            self.assertLogs(service.logger, level="WARNING") as logs,
+        ):
+            run(call("GET", "/rag/collections", headers={**AUTH, **headers}))
+        return logs.records[0].getMessage()
+
+    def test_log_lines_carry_the_callers_request_id(self):
+        self.assertEqual(
+            self.collections_logging({"X-Request-ID": "trace-123"}),
+            "[trace-123] listing collections",
+        )
+
+    def test_unsafe_request_id_is_not_logged(self):
+        self.assertEqual(
+            self.collections_logging({"X-Request-ID": "bad id!"}), "[-] listing collections"
+        )

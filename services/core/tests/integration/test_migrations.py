@@ -102,7 +102,7 @@ def test_v9_14_database_is_adopted_and_upgraded(scratch_engine: sa.Engine) -> No
     migrate(scratch_engine)
 
     assert schema_state(scratch_engine) == (
-        "0004",
+        "0005",
         [
             "fk_teachers_department_id_departments",
             "fk_teachers_institute_id_institutes",

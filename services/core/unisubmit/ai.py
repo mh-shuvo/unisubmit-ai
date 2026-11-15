@@ -30,7 +30,7 @@ async def get_ollama_status() -> dict:
                 and configured.split(":")[-1] == "latest"
                 for n in names
             )
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
         result["error"] = str(exc)
     return result
 
@@ -59,7 +59,7 @@ async def test_ollama_model() -> tuple[bool, str]:
             if not content:
                 return False, "Ollama responded, but the model returned no text."
             return True, content
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
         return False, str(exc)
 
 
@@ -83,5 +83,5 @@ async def get_improvement_suggestions(guideline_text: str, student_text: str) ->
             )
             r.raise_for_status()
             return r.json()["message"]["content"].strip()
-    except Exception:
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return "Local AI suggestions are temporarily unavailable. Compliance validation was still completed using approved rules."

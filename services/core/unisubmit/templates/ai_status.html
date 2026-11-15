@@ -21,7 +21,7 @@
     <span class="pill {{ 'ok' if status.model_installed else 'warn' }}">{{ 'INSTALLED' if status.model_installed else 'NOT FOUND' }}</span>
   </p>
   {% if status.error %}<p class="muted"><b>Connection detail:</b> {{ status.error }}</p>{% endif %}
-  <form method="post" action="/admin/ai/test"><button {% if not status.server_online or not status.model_installed %}disabled title="Start Ollama and install the configured model first"{% endif %}>Test configured model</button></form>
+  <form method="post" action="/admin/ai/test">{{ csrf_field(request) }}<button {% if not status.server_online or not status.model_installed %}disabled title="Start Ollama and install the configured model first"{% endif %}>Test configured model</button></form>
 </section>
 
 <section class="card">

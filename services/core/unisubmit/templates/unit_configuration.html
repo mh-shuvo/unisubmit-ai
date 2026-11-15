@@ -31,7 +31,7 @@
           </div>
         </div>
 
-        <form method="post" class="form-grid cols-3">
+        <form method="post" class="form-grid cols-3">{{ csrf_field(request) }}
           <label>
             Program
             <select name="program_id" required>
@@ -88,7 +88,7 @@
 
             <details>
               <summary>+ Add guideline version</summary>
-              <form method="post" action="/admin/configuration/{{ c.id }}/version" enctype="multipart/form-data" class="form-grid compact">
+              <form method="post" action="/admin/configuration/{{ c.id }}/version" enctype="multipart/form-data" class="form-grid compact">{{ csrf_field(request) }}
                 <label>
                   Version
                   <input name="version" placeholder="2.1" required>

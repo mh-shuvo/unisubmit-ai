@@ -11,6 +11,13 @@ class PDFError(Exception):
 
 
 PT_TO_MM = 25.4 / 72.0
+# Text a reader cannot see is where instructions to the model hide (P4.9):
+# white, fully transparent, smaller than this, or outside the page.
+TINY_PT = 4.0
+WHITE = 0xFFFFFF
+# Hidden fragments shorter than this stay in the text sent to the model; they
+# are too short to instruct it, and removing them could cut ordinary words.
+HIDDEN_FRAGMENT_MIN = 12
 
 
 def _norm_font(name: str) -> str:
@@ -53,13 +60,14 @@ def inspect_pdf(path: str):
         raise PDFError("Only PDF files are allowed.")
     try:
         doc = fitz.open(path)
-    except Exception as e:
-        raise PDFError(f"Invalid or corrupted PDF: {e}")
+    except (RuntimeError, ValueError) as e:  # PyMuPDF's FileDataError is a RuntimeError
+        raise PDFError(f"Invalid or corrupted PDF: {e}") from e
     if doc.needs_pass:
         doc.close()
         raise PDFError("Password-protected PDFs are not allowed.")
 
     texts, page_sizes, font_sizes, page_details = [], [], [], []
+    hidden = []  # (page, text)
     all_font_weighted, all_size_weighted = [], []
 
     for page_idx, page in enumerate(doc):
@@ -87,6 +95,13 @@ def inspect_pdf(path: str):
                     raw_font = span.get("font") or ""
                     font = _norm_font(raw_font)
                     sb = tuple(round(float(x), 1) for x in (span.get("bbox") or (0, 0, 0, 0)))
+                    if (
+                        span.get("color") == WHITE
+                        or span.get("alpha", 255) == 0
+                        or 0 < size < TINY_PT
+                        or not fitz.Rect(sb).intersects(rect)
+                    ):
+                        hidden.append((page_idx + 1, text))
                     # _norm_font collapses every weight to the family name, so record
                     # the style here or 'TimesNewRomanPS-BoldMT' is indistinguishable
                     # from the regular face and no bold check can ever succeed.
@@ -213,6 +228,11 @@ def inspect_pdf(path: str):
     return {
         "page_count": len(page_sizes),
         "text": text,
+        "hidden_text": {
+            "pages": sorted({page for page, _ in hidden}),
+            "characters": sum(len(fragment) for _, fragment in hidden),
+            "fragments": [fragment for _, fragment in hidden],
+        },
         "searchable": len(text) > 50,
         "page_sizes": page_sizes,
         "font_sizes": font_sizes,
@@ -220,4 +240,33 @@ def inspect_pdf(path: str):
         "dominant_font": _weighted_mode(all_font_weighted),
         "dominant_font_size": _weighted_mode(all_size_weighted),
         "pages": page_details,
+    }
+
+
+def visible_text(info: dict) -> str:
+    """The document text without its hidden fragments, for the model (P4.9)."""
+    text = info["text"]
+    for fragment in info.get("hidden_text", {}).get("fragments", []):
+        if len(fragment) >= HIDDEN_FRAGMENT_MIN:
+            text = text.replace(fragment, "")
+    return text
+
+
+def hidden_text_result(info: dict) -> dict | None:
+    """A warning listing the pages with hidden or tiny text, or None."""
+    hidden = info.get("hidden_text") or {}
+    if not hidden.get("characters"):
+        return None
+    pages = ", ".join(str(page) for page in hidden["pages"])
+    return {
+        "category": "System Restriction",
+        "name": "No hidden or tiny text",
+        "severity": "Warning",
+        "status": "WARNING",
+        "expected": "All text visible",
+        "detected": f"{hidden['characters']} hidden characters on page(s) {pages}",
+        "message": (
+            "Some text is white, transparent, smaller than 4 pt or off the page. It was left "
+            "out of the AI review; remove it unless it is intentional."
+        ),
     }

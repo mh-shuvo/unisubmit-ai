@@ -5,8 +5,10 @@ the code under test become savepoints (see `conftest.py`).
 """
 
 import os
+import re
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +18,25 @@ from sqlalchemy.orm import Session, sessionmaker
 from factories import PASSWORD, build_world
 from unisubmit import main as web
 from unisubmit.core.config import get_settings
+
+CSRF_INPUT = re.compile(r'name="csrf_token" value="([^"]+)"')
+
+
+class CsrfClient(TestClient):
+    """Sends the session's CSRF token with every unsafe request, as a browser
+    submitting the page's form would; set `send_csrf = False` to send none (P4.2)."""
+
+    send_csrf = True
+
+    def csrf_token(self) -> str:
+        match = CSRF_INPUT.search(super().request("GET", "/student/login").text)
+        assert match is not None, "the login page has no CSRF field"
+        return match.group(1)
+
+    def request(self, method: str, url: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        if self.send_csrf and method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            kwargs["headers"] = {"X-CSRF-Token": self.csrf_token(), **(kwargs.get("headers") or {})}
+        return super().request(method, url, **kwargs)
 
 
 class AppTestCase(unittest.TestCase):
@@ -40,8 +61,8 @@ class AppTestCase(unittest.TestCase):
         with self.Session() as db:
             self.world = build_world(db, self.tmp)
 
-    def client(self) -> TestClient:
-        return TestClient(self.app, follow_redirects=False)
+    def client(self) -> CsrfClient:
+        return CsrfClient(self.app, follow_redirects=False)
 
     def logged_in_student(self) -> TestClient:
         client = self.client()

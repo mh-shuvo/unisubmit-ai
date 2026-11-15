@@ -19,7 +19,7 @@
 
   <section class="panel">
     <div class="panel-head"><div><h2>Parse & Index Approved Guideline</h2><p>Re-indexing first parses the PDF into explicit rules, then updates the RAG knowledge base.</p></div><span class="badge {{'passed' if tv.format_profile_status=='Active' else 'pending'}}">{{tv.format_profile_status}}</span></div>
-    <div class="rag-box"><div><small>Qdrant collection</small><b>{{tv.rag_collection or 'Not created yet'}}</b></div><form method="post" action="/admin/template-version/{{tv.id}}/index"><button class="btn" {% if job_active %}disabled{% endif %}>{{'Re-parse & Re-index Guideline' if tv.rag_status=='Indexed' else 'Parse & Index Guideline'}}</button></form></div>
+    <div class="rag-box"><div><small>Qdrant collection</small><b>{{tv.rag_collection or 'Not created yet'}}</b></div><form method="post" action="/admin/template-version/{{tv.id}}/index">{{ csrf_field(request) }}<button class="btn" {% if job_active %}disabled{% endif %}>{{'Re-parse & Re-index Guideline' if tv.rag_status=='Indexed' else 'Parse & Index Guideline'}}</button></form></div>
     {% if job %}<div class="job-line"><span>Job #{{job.id}} · {{job.type|replace("_", " ")|capitalize}}</span><span class="badge {{job.status}}">{{job.status}}</span>{% if job_active %}<span>{{'Running, attempt ' ~ job.attempts if job.status == 'running' else 'Waiting for the worker'}}; this page refreshes every 10 seconds</span>{% elif job.status == 'failed' %}<span>{{job.last_error}}</span>{% endif %}</div>{% endif %}
   </section>
 
@@ -40,7 +40,7 @@
   </section>
   {% endif %}
 
-  <form method="post" action="/admin/template-version/{{tv.id}}/review-rules" id="rule-review-form">
+  <form method="post" action="/admin/template-version/{{tv.id}}/review-rules" id="rule-review-form">{{ csrf_field(request) }}
     <section class="panel rule-review-toolbar">
       <div class="panel-head">
         <div><h2>Rule Severity Review</h2><p>Qwen suggests a severity, but the Department/Institute Admin decides the final validation effect before activation.</p></div>
@@ -87,7 +87,7 @@
 
   <section class="panel">
     <div class="panel-head"><div><h2>Manual Semantic Rules</h2><p>Add institution-specific semantic checks that are not stated in the approved guideline. These use the same Qwen + RAG evaluation pipeline as parsed semantic requirements.</p></div><span class="badge">{{parsed_profile.get('semantic_requirements',[])|selectattr('manual')|list|length}} manual rule(s)</span></div>
-    <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules" class="form-grid cols-2 semantic-add-form">
+    <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules" class="form-grid cols-2 semantic-add-form">{{ csrf_field(request) }}
       <label class="span-2">Requirement text<textarea name="requirement" required placeholder="Example: The Methodology section must explain how ambiguous cases are resolved."></textarea></label>
       <label>Target section<input name="target_section" placeholder="e.g., Abstract, Methodology, Discussion"></label>
       <label>Severity<select name="severity"><option>Mandatory</option><option>Warning</option><option>Recommendation</option><option>Ignore</option></select></label>
@@ -99,14 +99,14 @@
       <div class="list-card manual-semantic-card">
         <div class="row-between"><div><b>{{r.get('requirement')}}</b><span>{{r.get('target_section') or 'Document-wide'}} · {{r.get('final_severity','Mandatory')}}</span><small>Added by {{r.get('created_by','Department/Institute Admin')}}{% if r.get('created_at') %} · {{r.get('created_at')}}</small>{% endif %}</div><span class="badge">Manual</span></div>
         <details style="margin-top:12px"><summary class="btn ghost small">Edit rule</summary>
-          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/update" class="form-grid cols-2" style="margin-top:12px">
+          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/update" class="form-grid cols-2" style="margin-top:12px">{{ csrf_field(request) }}
             <label class="span-2">Requirement text<textarea name="requirement" required>{{r.get('requirement')}}</textarea></label>
             <label>Target section<input name="target_section" value="{{r.get('target_section','')}}"></label>
             <label>Severity<select name="severity"><option {% if r.get('final_severity')=='Mandatory' %}selected{% endif %}>Mandatory</option><option {% if r.get('final_severity')=='Warning' %}selected{% endif %}>Warning</option><option {% if r.get('final_severity')=='Recommendation' %}selected{% endif %}>Recommendation</option><option {% if r.get('final_severity')=='Ignore' %}selected{% endif %}>Ignore</option></select></label>
             <label class="span-2">Expected evidence<textarea name="expected_evidence">{{r.get('expected_evidence') or r.get('evidence','')}}</textarea></label>
             <div class="span-2 actions"><button class="btn small" type="submit">Save Changes</button></div>
           </form>
-          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/delete" style="margin-top:8px" onsubmit="return confirm('Delete this manual semantic rule?')"><button class="btn ghost small" type="submit">Delete Rule</button></form>
+          <form method="post" action="/admin/template-version/{{tv.id}}/semantic-rules/{{r.get('semantic_id')}}/delete" style="margin-top:8px" onsubmit="return confirm('Delete this manual semantic rule?')">{{ csrf_field(request) }}<button class="btn ghost small" type="submit">Delete Rule</button></form>
         </details>
       </div>
       {% else %}<div class="empty-state">No manual semantic rules have been added.</div>{% endfor %}
@@ -140,12 +140,12 @@
   </script>
 
   {% if tv.format_profile_status[:6]=='Parsed' %}
-  <section class="panel"><div class="panel-head"><div><h2>Review Before Activation</h2><p>Confirm that the extracted rules faithfully reflect the approved guideline. Admin does not need to re-type them.</p></div><form method="post" action="/admin/template-version/{{tv.id}}/activate-profile"><button class="btn">Activate Parsed Rules</button></form></div></section>
+  <section class="panel"><div class="panel-head"><div><h2>Review Before Activation</h2><p>Confirm that the extracted rules faithfully reflect the approved guideline. Admin does not need to re-type them.</p></div><form method="post" action="/admin/template-version/{{tv.id}}/activate-profile">{{ csrf_field(request) }}<button class="btn">Activate Parsed Rules</button></form></div></section>
   {% elif tv.format_profile_status=='Active' %}
   <div class="alert success">This guideline profile is active. Mandatory parsed rules now contribute to PASS / REVISION REQUIRED.</div>
   {% endif %}
 
-  <section class="panel"><h2>Optional Additional Restrictions</h2><p class="helper">Use this only for an institutional restriction that is not part of the approved guideline PDF.</p><form method="post" action="/admin/template-version/{{tv.id}}/rules" class="form-grid"><label>Rule name<input name="name" required></label><label>Severity<select name="severity"><option>Mandatory</option><option>Warning</option><option>Recommendation</option></select></label><label>Rule type<select name="validator"><option value="searchable_pdf">Searchable PDF</option><option value="max_file_mb">Maximum file size (MB)</option><option value="min_pages">Minimum pages</option><option value="max_pages">Maximum pages</option><option value="section_present">Required section</option><option value="section_max_words">Section maximum words</option><option value="contains_text">Must contain text</option><option value="a4_page_size">A4 page size</option></select></label><label>Target / Section<input name="target" placeholder="Abstract"></label><label>Expected value<input name="expected" placeholder="20 / 300 / true"></label><button class="btn">Add Additional Restriction</button></form></section>
+  <section class="panel"><h2>Optional Additional Restrictions</h2><p class="helper">Use this only for an institutional restriction that is not part of the approved guideline PDF.</p><form method="post" action="/admin/template-version/{{tv.id}}/rules" class="form-grid">{{ csrf_field(request) }}<label>Rule name<input name="name" required></label><label>Severity<select name="severity"><option>Mandatory</option><option>Warning</option><option>Recommendation</option></select></label><label>Rule type<select name="validator"><option value="searchable_pdf">Searchable PDF</option><option value="max_file_mb">Maximum file size (MB)</option><option value="min_pages">Minimum pages</option><option value="max_pages">Maximum pages</option><option value="section_present">Required section</option><option value="section_max_words">Section maximum words</option><option value="contains_text">Must contain text</option><option value="a4_page_size">A4 page size</option></select></label><label>Target / Section<input name="target" placeholder="Abstract"></label><label>Expected value<input name="expected" placeholder="20 / 300 / true"></label><button class="btn">Add Additional Restriction</button></form></section>
 
   <section class="panel"><h2>Active Additional Restrictions</h2><div class="card-list">{% for r in tv.rules %}<div class="list-card"><div><b>{{r.name}}</b><span>{{r.validator}} · {{r.target}} {{r.expected}}</span><small>{{r.source_text}}</small></div><span class="badge">{{r.severity}}</span></div>{% else %}<div class="empty-state">No additional restrictions.</div>{% endfor %}</div></section>
 </main></div>

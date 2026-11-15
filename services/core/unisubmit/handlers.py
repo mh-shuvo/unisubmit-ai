@@ -44,7 +44,7 @@ from .models import (
     SubmissionVersion,
     TemplateVersion,
 )
-from .pdf_utils import inspect_pdf
+from .pdf_utils import hidden_text_result, inspect_pdf, visible_text
 from .queue import FollowUp, TransientError
 from .reporting import build_validation_report
 from .validators import run_rules
@@ -105,6 +105,29 @@ class _Checked:
     ai_note: str
 
 
+SEMANTIC_STATUSES = {"PASS", "FAIL", "WARNING", "NOT VERIFIED"}
+
+
+def _semantic_only(results: object) -> list[dict[str, Any]]:
+    """The model's results, confined to the semantic category (P4.9).
+
+    Whatever the document persuaded the model to write, its rows cannot pose as
+    formatting or restriction results, and an unknown status counts as not
+    verified. Deterministic results are never replaced: the model's rows are
+    only added, and they can only make the outcome stricter.
+    """
+    rows = results if isinstance(results, list) else []
+    return [
+        {
+            **row,
+            "category": "Semantic Compliance",
+            "status": row["status"] if row.get("status") in SEMANTIC_STATUSES else "NOT VERIFIED",
+        }
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+
 class ValidateSubmission:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -135,6 +158,8 @@ class ValidateSubmission:
         version.status = submission.status = SubmissionStatus.PROCESSING
         info = inspect_pdf(str(storage.resolve(version.pdf_path)))
         results, outcome = run_rules(guideline.rules, info)
+        if (hidden := hidden_text_result(info)) is not None:
+            results.append(hidden)
         status = SubmissionStatus(outcome)
         profile = _normalize_profile_severities(copy.deepcopy(guideline.format_profile_json or {}))
         format_results = (
@@ -152,7 +177,7 @@ class ValidateSubmission:
                 submission.program,
                 guideline,
                 profile,
-                info["text"],
+                visible_text(info),
                 submission.ai_profile.base_model,
             )
         elif submission.ai_profile:
@@ -172,7 +197,7 @@ class ValidateSubmission:
         if ai is not None:
             ai_text = ai.get("response", "")
             version.ai_run_reference = ai.get("run_id", "")
-            semantic = ai.get("semantic_results") or []
+            semantic = _semantic_only(ai.get("semantic_results"))
             results.extend(semantic)
             if any(
                 r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in semantic
