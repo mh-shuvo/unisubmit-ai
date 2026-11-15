@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-59 entries: 51 defects and 8 limitations. 7 open, 52 closed.
+59 entries: 51 defects and 8 limitations. 5 open, 54 closed.
 
 ---
 
@@ -26,8 +26,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [LIM-003](LIM-003.md) | One Ollama instance is a shared serial resource with no admission control | limitation | `resource-contention` | major | Any throughput claim; running `test_job.py` beside the live worker | 2026-10-27 |
 | [LIM-005](LIM-005.md) | Reproduction artefacts the defect documents cite no longer exist | limitation | `observability-gap` | blocking | Replaying any quantitative claim in the episode documents | 2026-11-02 |
 | [DEF-021](DEF-021.md) | An unavailable repair service is reported as invalid model output | defect | `observability-gap` | major | Nothing; misdirects diagnosis of a model-service outage | 2026-11-02 |
-| [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | minor | Nothing; matters after a database leak | 2026-11-14 |
-| [DEF-041](DEF-041.md) | Forms carry no CSRF token and logout is a GET | defect | `insecure-default` | minor | Nothing; `SameSite=Lax` covers the common case | 2026-11-14 |
 | [DEF-044](DEF-044.md) | The web app's copy of the semantic-rule merge still misreads scalar `source_pages` | defect | `llm-output-contract` | major | Saving a parsed profile whose model output gives pages as a number | 2026-11-14 |
 
 ---
@@ -83,6 +81,8 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [LIM-008](LIM-008.md) | Docker on macOS cannot reach the Apple GPU, so containerised embeddings run on the CPU | limitation | `runtime-environment` | n/a | v9.14, `4848c62` | `EmbeddingDeviceTests` |
 | [DEF-045](DEF-045.md) | The web app and the worker both create the schema, and on an empty database the worker crashes | defect | `job-coordination` | Timing/Serialisation | v9.14, `4848c62` (introduced and fixed before merge) | `test_worker_waits_for_the_schema_instead_of_creating_it` |
 | [DEF-039](DEF-039.md) | Model changes never reach an existing database, because there are no migrations | defect | `schema-drift` | Function | v10.0, `b0367f6` | `test_migrations.py` |
+| [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | Algorithm/Method | v10.3, `057cede` | `test_legacy_hash_is_replaced_with_argon2id_at_login` |
+| [DEF-041](DEF-041.md) | Forms carry no CSRF token and logout is a GET | defect | `insecure-default` | Checking | v10.3, `057cede` | `test_every_post_route_checks_the_csrf_token` |
 | [DEF-046](DEF-046.md) | The upload lock is released before the new version's job exists, so two quick uploads can still both be queued | defect | `job-coordination` | Timing/Serialisation | v10.0, `39ebc9b` | `test_concurrent_uploads_never_share_a_version_number` |
 | [DEF-047](DEF-047.md) | Every HTML page fails with 500 after the Starlette 1.x upgrade, and no test rendered a page | defect | `dependency-api-drift` | Interface | v10.0, `64556cd` (introduced and fixed before merge) | `PageRenderingTests` |
 | [DEF-048](DEF-048.md) | In the uv-built images, every console script points at an interpreter that does not exist | defect | `runtime-environment` | Build/Package | v10.0, `e884275` (introduced and fixed before merge) | none |
@@ -100,7 +100,8 @@ restructuring plan, branch `phase-0-demo-critical-fixes`) in
 `CHANGELOG_v9_14.md`; `DEF-039`, `DEF-046` to `DEF-048` and `LIM-006` (Phase 1, branch
 `phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`; `DEF-042`, `DEF-043`,
 `DEF-049` and `DEF-050` (Phase 2, same branch) in `CHANGELOG_v10_1.md`; `DEF-037`, `DEF-038` and
-`DEF-051` (Phase 3, same branch) in `CHANGELOG_v10_2.md`. `DEF-017` to `DEF-019` are on branch
+`DEF-051` (Phase 3, same branch) in `CHANGELOG_v10_2.md`; `DEF-040` and `DEF-041` (Phase 4,
+same branch) in `CHANGELOG_v10_3.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---

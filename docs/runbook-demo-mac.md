@@ -70,6 +70,10 @@ University Admin. Create a Platform Admin to rename it or add universities:
 Files uploaded before v10.1 are moved into `storage/<university>/` by the
 `migrate` step automatically ([DEF-042](defects/DEF-042.md)).
 
+From v10.3 everyone is signed out once after the upgrade, and a page left open
+from before it answers "Your form has expired" when submitted: reload it.
+Passwords stay the same; they are rehashed at each user's next login.
+
 ## Starting the demo
 
 ```bash

@@ -90,6 +90,21 @@ A missing or weak secret stops the web app at startup with the variables to
 set. Qdrant needs no key: the AI service connects to it by URL (`QDRANT_URL`),
 and its port is bound to `127.0.0.1`.
 
+## Security
+- Passwords are hashed with Argon2id; older hashes are upgraded at the next
+  login. Ten wrong passwords in a row lock an account for 15 minutes.
+- Every form carries a per-session CSRF token and every POST checks it;
+  signing out is a POST. Sessions last 8 hours, start afresh at each login and
+  end everywhere else when the password changes (on the profile or dashboard
+  page). Set `UNISUBMIT_SESSION_HTTPS_ONLY=true` behind HTTPS.
+- Errors show a page with a reference, the request ID, which every log line of
+  the request carries and which is passed on to the queued jobs and the AI
+  service. `UNISUBMIT_LOG_JSON=true` writes one JSON object per line.
+- Admin changes are recorded in the `audit_events` table.
+- Text a reader cannot see (white, transparent, under 4 pt, off the page) is
+  flagged in the report and left out of what the model reads, and the model's
+  results can only add semantic findings, never replace deterministic ones.
+
 ## Run with Docker
 
 ```bash
