@@ -43,9 +43,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 # Legacy baseline (P1.3): the rules each module broke when Ruff was introduced.
 # Entries shrink as modules are split (Phases 5 and 6); new modules get none.
 "services/ai/unisubmit_ai/main.py" = ["ASYNC240", "BLE001", "B904", "B905", "E501", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW0603", "PLW2901", "PTH107", "PTH108", "PTH110", "RUF001", "S110", "SIM105"]
-"services/core/unisubmit/ai.py" = ["E501"]
 "services/core/unisubmit/ai_service_client.py" = ["ASYNC230", "PTH123"]
-"services/core/unisubmit/config.py" = ["PLR2004"]
 "services/core/unisubmit/validation/rules/*.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
 "services/core/unisubmit/pdf_utils.py" = ["B904", "B905", "PLR0912", "PLR0915", "PLR2004", "RUF007"]
 "services/core/unisubmit/report_parser.py" = ["E501", "PLW2901"]
@@ -101,7 +99,7 @@ layers = [
   "unisubmit.organisation",
   "unisubmit.tenancy",
   "unisubmit.auth",
-  "unisubmit.queries : unisubmit.queue : unisubmit.storage : unisubmit.audit : unisubmit.reporting : unisubmit.validators : unisubmit.emailer : unisubmit.ai_service_client : unisubmit.ai",
+  "unisubmit.queries : unisubmit.queue : unisubmit.storage : unisubmit.audit : unisubmit.reporting : unisubmit.validators : unisubmit.emailer : unisubmit.ai_service_client",
   "unisubmit.pdf_utils : unisubmit.report_parser",
   "unisubmit.models",
   "unisubmit.core",
