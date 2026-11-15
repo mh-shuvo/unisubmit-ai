@@ -12,7 +12,7 @@ the system working, and belongs in a validation report. This register records
 faults in the project's own code (`DEF-nnn`) and understood constraints that are
 not faults (`LIM-nnn`).
 
-58 entries: 50 defects and 8 limitations. 9 open, 49 closed.
+59 entries: 51 defects and 8 limitations. 7 open, 52 closed.
 
 ---
 
@@ -26,8 +26,6 @@ The working queue. Fixed one at a time, newest constraint last.
 | [LIM-003](LIM-003.md) | One Ollama instance is a shared serial resource with no admission control | limitation | `resource-contention` | major | Any throughput claim; running `test_job.py` beside the live worker | 2026-10-27 |
 | [LIM-005](LIM-005.md) | Reproduction artefacts the defect documents cite no longer exist | limitation | `observability-gap` | blocking | Replaying any quantitative claim in the episode documents | 2026-11-02 |
 | [DEF-021](DEF-021.md) | An unavailable repair service is reported as invalid model output | defect | `observability-gap` | major | Nothing; misdirects diagnosis of a model-service outage | 2026-11-02 |
-| [DEF-037](DEF-037.md) | Submitting the new-submission form twice creates two submissions and two jobs | defect | `job-coordination` | major | Nothing; wastes a model run per double-click | 2026-11-14 |
-| [DEF-038](DEF-038.md) | Guideline parsing and indexing run inside the admin's HTTP request for up to 25 minutes | defect | `timeout-misalignment` | major | Any deployment behind a proxy with a shorter timeout | 2026-11-14 |
 | [DEF-040](DEF-040.md) | Passwords are hashed with hand-written PBKDF2 at 180,000 iterations | defect | `insecure-default` | minor | Nothing; matters after a database leak | 2026-11-14 |
 | [DEF-041](DEF-041.md) | Forms carry no CSRF token and logout is a GET | defect | `insecure-default` | minor | Nothing; `SameSite=Lax` covers the common case | 2026-11-14 |
 | [DEF-044](DEF-044.md) | The web app's copy of the semantic-rule merge still misreads scalar `source_pages` | defect | `llm-output-contract` | major | Saving a parsed profile whose model output gives pages as a number | 2026-11-14 |
@@ -78,8 +76,10 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-032](DEF-032.md) | Qdrant collections are named from display names, which collide | defect | `lossy-normalisation` | Algorithm/Method | v9.14, `4848c62` | `CollectionNameTests` |
 | [DEF-033](DEF-033.md) | The AI service blocks its event loop on embedding and Qdrant calls | defect | `event-loop-blocking` | Timing/Serialisation | v9.14, `4848c62` | `EventLoopTests` |
 | [DEF-034](DEF-034.md) | A job interrupted mid-run stays PROCESSING forever | defect | `job-coordination` | Function | v9.14, `4848c62` | `WorkerTests` |
-| [DEF-035](DEF-035.md) | A stale per-profile AI service URL overrides the configured one | defect | `config-resolution` | Assignment/Initialisation | v9.14, `4848c62` | `AIServiceRoutingTests` |
-| [DEF-036](DEF-036.md) | The queue worker swallows its own failures | defect | `observability-gap` | Checking | v9.14, `4848c62` | `test_failure_after_a_database_error_is_recorded_and_logged` |
+| [DEF-035](DEF-035.md) | A stale per-profile AI service URL overrides the configured one | defect | `config-resolution` | Assignment/Initialisation | v9.14, `4848c62` | `ValidationHandlerTests`, `GuidelineJobTests` |
+| [DEF-036](DEF-036.md) | The queue worker swallows its own failures | defect | `observability-gap` | Checking | v9.14, `4848c62` | `test_permanent_failure_is_recorded_logged_and_not_retried` |
+| [DEF-037](DEF-037.md) | Submitting the new-submission form twice creates two submissions and two jobs | defect | `job-coordination` | Checking | v10.2, `2493a37` | `test_double_submit_creates_one_submission` |
+| [DEF-038](DEF-038.md) | Guideline parsing and indexing run inside the admin's HTTP request for up to 25 minutes | defect | `timeout-misalignment` | Timing/Serialisation | v10.2, `74ca214` | `test_parse_and_index_button_only_queues_a_job` |
 | [LIM-008](LIM-008.md) | Docker on macOS cannot reach the Apple GPU, so containerised embeddings run on the CPU | limitation | `runtime-environment` | n/a | v9.14, `4848c62` | `EmbeddingDeviceTests` |
 | [DEF-045](DEF-045.md) | The web app and the worker both create the schema, and on an empty database the worker crashes | defect | `job-coordination` | Timing/Serialisation | v9.14, `4848c62` (introduced and fixed before merge) | `test_worker_waits_for_the_schema_instead_of_creating_it` |
 | [DEF-039](DEF-039.md) | Model changes never reach an existing database, because there are no migrations | defect | `schema-drift` | Function | v10.0, `b0367f6` | `test_migrations.py` |
@@ -91,6 +91,7 @@ recorded only in `VALIDATION_FIX_v9_10_1.md`.
 | [DEF-043](DEF-043.md) | Supervisor emails and unit names are unique across the whole installation | defect | `scope-leakage` | Relationship | v10.1, `e44df44` | `test_same_supervisor_email_may_exist_in_two_universities` |
 | [DEF-049](DEF-049.md) | The submission configuration page returns its refusal instead of raising it | defect | `insecure-default` | Checking | v10.1, `e44df44` | `test_unit_pages_refuse_a_university_admin` |
 | [DEF-050](DEF-050.md) | Adopting a pre-migration database compared it with the latest models | defect | `schema-drift` | Algorithm/Method | v10.1, `e44df44` (introduced and fixed before merge) | `test_v9_14_database_is_adopted_and_upgraded` |
+| [DEF-051](DEF-051.md) | An SMTP failure after a passed validation re-runs the validation and can mark it failed | defect | `job-coordination` | Function | v10.2, `74ca214` | `test_smtp_failure_is_retried_not_fatal` |
 
 `DEF-007`, `DEF-016`, `DEF-017` to `DEF-019` and `LIM-001` are fixed but are
 not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
@@ -98,7 +99,8 @@ not yet described in any `CHANGELOG_v*.md`; `DEF-023` is described in
 restructuring plan, branch `phase-0-demo-critical-fixes`) in
 `CHANGELOG_v9_14.md`; `DEF-039`, `DEF-046` to `DEF-048` and `LIM-006` (Phase 1, branch
 `phase-1-tooling-layout-migrations`) in `CHANGELOG_v10_0.md`; `DEF-042`, `DEF-043`,
-`DEF-049` and `DEF-050` (Phase 2, same branch) in `CHANGELOG_v10_1.md`. `DEF-017` to `DEF-019` are on branch
+`DEF-049` and `DEF-050` (Phase 2, same branch) in `CHANGELOG_v10_1.md`; `DEF-037`, `DEF-038` and
+`DEF-051` (Phase 3, same branch) in `CHANGELOG_v10_2.md`. `DEF-017` to `DEF-019` are on branch
 `unsatisfiable-heading-and-spacing-rules`.
 
 ---
@@ -158,8 +160,8 @@ thesis submission, and [DEF-021](DEF-021.md) is [LIM-006](LIM-006.md)
 demonstrated: a regression its own test would have caught, undetected for
 sixteen days because nothing runs that test.
 
-**T7 — Concurrency and job lifecycle** (8)
-[DEF-024](DEF-024.md) · [DEF-025](DEF-025.md) · [DEF-026](DEF-026.md) · [DEF-033](DEF-033.md) · [DEF-034](DEF-034.md) · [DEF-037](DEF-037.md) · [DEF-045](DEF-045.md) · [DEF-046](DEF-046.md)
+**T7 — Concurrency and job lifecycle** (9)
+[DEF-024](DEF-024.md) · [DEF-025](DEF-025.md) · [DEF-026](DEF-026.md) · [DEF-033](DEF-033.md) · [DEF-034](DEF-034.md) · [DEF-037](DEF-037.md) · [DEF-045](DEF-045.md) · [DEF-046](DEF-046.md) · [DEF-051](DEF-051.md)
 
 Where work runs and who owns it. The event loop was shared by requests and a
 worker that did not yield; uploads were numbered without a lock; a job had no
@@ -170,6 +172,8 @@ is the cautionary one: a regression introduced by the fix for DEF-024, found
 only by booting the deployment from empty volumes. [DEF-046](DEF-046.md) is
 the DEF-026 fix's own gap: the lock was released one commit too early, and a
 concurrency test hid it until a faster database driver changed the timing.
+[DEF-051](DEF-051.md) is about the unit of work: an email sent inside the
+validation job gave the email's failures the validation's retry policy.
 
 **T8 — Deployment readiness: secure defaults, isolation and schema lifecycle** (12)
 [DEF-027](DEF-027.md) · [DEF-028](DEF-028.md) · [DEF-029](DEF-029.md) · [DEF-030](DEF-030.md) · [DEF-039](DEF-039.md) · [DEF-040](DEF-040.md) · [DEF-041](DEF-041.md) · [DEF-042](DEF-042.md) · [DEF-043](DEF-043.md) · [DEF-048](DEF-048.md) · [DEF-049](DEF-049.md) · [DEF-050](DEF-050.md)
@@ -184,7 +188,7 @@ anyone choosing it, which is the argument for failing closed at startup.
 
 Maintained by hand. Update them in the same edit that adds or closes an entry.
 
-### By class, all 58 entries
+### By class, all 59 entries
 
 | Class | Count |
 |-------|-------|
@@ -192,7 +196,7 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `insecure-default` | 7 |
 | `observability-gap` | 6 |
 | `llm-output-contract` | 4 |
-| `job-coordination` | 5 |
+| `job-coordination` | 6 |
 | `event-loop-blocking` | 3 |
 | `config-resolution` | 3 |
 | `timeout-misalignment` | 3 |
@@ -205,11 +209,11 @@ Maintained by hand. Update them in the same edit that adds or closes an entry.
 | `runtime-environment` | 3 |
 | `fail-open` | 1 |
 | `schema-drift` | 2 |
-| **Total** | **58** |
+| **Total** | **59** |
 
-### By ODC defect type, the 50 `DEF` entries
+### By ODC defect type, the 51 `DEF` entries
 
-Limitations carry no ODC triple, so these sum to 50 rather than 58.
+Limitations carry no ODC triple, so these sum to 51 rather than 59.
 
 | Defect type | Count |
 |-------------|-------|
@@ -217,25 +221,25 @@ Limitations carry no ODC triple, so these sum to 50 rather than 58.
 | Checking | 13 |
 | Timing/Serialisation | 9 |
 | Assignment/Initialisation | 7 |
-| Function | 3 |
+| Function | 4 |
 | Interface | 2 |
 | Build/Package | 2 |
 | Relationship | 1 |
-| **Total** | **50** |
+| **Total** | **51** |
 
 | Qualifier | Count |
 |-----------|-------|
-| Incorrect | 32 |
+| Incorrect | 33 |
 | Missing | 16 |
 | Extraneous | 2 |
 
-### By trigger, the 50 `DEF` entries
+### By trigger, the 51 `DEF` entries
 
 The trigger is also the detection method: how the defect actually surfaced.
 
 | Trigger | Count |
 |---------|-------|
-| Logic/Flow | 24 |
+| Logic/Flow | 25 |
 | Design Conformance | 8 |
 | Normal Mode | 5 |
 | Workload/Stress | 2 |
@@ -244,7 +248,7 @@ The trigger is also the detection method: how the defect actually surfaced.
 | Lateral Compatibility | 2 |
 | Complex Path | 2 |
 | Rare Situation | 1 |
-| **Total** | **50** |
+| **Total** | **51** |
 
 Worth noting when this table is quoted: 8 of the first 23 were found by
 comparing behaviour against the guideline's intent, and all 8 of those are in
@@ -258,14 +262,14 @@ have revealed them; the exceptions, [DEF-032](DEF-032.md) and
 [DEF-044](DEF-044.md), would have shown up only as a wrong citation or a
 crash on an unusual model response.
 
-### By severity, all 58 entries
+### By severity, all 59 entries
 
 | Severity | Count |
 |----------|-------|
 | blocking | 19 |
-| major | 28 |
+| major | 29 |
 | minor | 11 |
-| **Total** | **58** |
+| **Total** | **59** |
 
 ---
 

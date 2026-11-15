@@ -45,12 +45,23 @@ Restricted to the assigned academic unit:
 Academic rules are not manually retyped into the application. The official guideline PDF is indexed by the AI service and used as the primary validation source. An optional Additional Rules PDF can be indexed into the same program/version RAG collection. Admins can still add special explicit restrictions such as searchable PDF, file-size limit or minimum pages.
 
 ## Queue
-Every uploaded version creates an AI job. A separate worker process,
-`python -m unisubmit.worker`, takes one job at a time until the queue is empty,
-then waits for new jobs. It never runs inside the web server, so pages stay
-responsive while a thesis is validated. Failed jobs retry up to 3 times and do
-not block the rest of the queue. A job left running by a worker that stopped is
-put back in the queue.
+Background work is a job in the `jobs` table: validating an uploaded version,
+parsing a guideline, indexing it, and emailing the supervisor about a passed
+version. A separate worker process, `python -m unisubmit.worker`, takes one job
+at a time, starting with the university that used the model least in the last
+hour. It never runs inside the web server, so no page waits on the model.
+
+A job that fails because the AI service or SMTP is unreachable is retried after
+2, then 4 minutes, up to `UNISUBMIT_MAX_JOB_ATTEMPTS` (3) attempts; any other
+failure, such as an unreadable PDF, fails at once. Stopping the worker puts its
+job straight back in the queue; a job whose worker was killed is requeued after
+`UNISUBMIT_JOB_TIMEOUT_S` (2,100 s). Unit admins see their unit's jobs and their
+last errors on the queue page; the Platform Admin's AI page shows queue depth,
+waiting time and durations.
+
+Uploads are checked while they arrive (PDF signature, `UNISUBMIT_MAX_UPLOAD_MB`),
+fingerprinted with SHA-256 so an identical upload queues nothing, and capped per
+student and per university in any 24 hours (`UNISUBMIT_DAILY_UPLOADS_PER_*`).
 
 ## Repository layout
 

@@ -129,7 +129,8 @@ UNISUBMIT_DATABASE_URL=postgresql+psycopg://unisubmit:<password>@127.0.0.1:5433/
 | AI service exits at startup: Qdrant failed | Docker is not running, or `QDRANT_URL` in `.env` is not `http://127.0.0.1:6333` |
 | `app` and `worker` never start; `migrate` exited 1 | `docker compose logs migrate`: a database created before v10.0 that differs from the models is refused, with the differences listed ([DEF-039](defects/DEF-039.md)) |
 | The web app exits: "UniSubmit cannot start; set these…" | The listed `UNISUBMIT_*` variables are missing or too short in `.env` |
-| A job stays "AI validation in progress" | The worker stopped mid-job; it is requeued when the worker restarts after `RAG_VALIDATE_TIMEOUT` + 5 minutes. `docker compose logs worker` says why it stopped |
+| A job stays "AI validation in progress" | The queue page shows its attempts and last error. An unreachable AI service is retried after 2, then 4 minutes; a worker that was killed has its job requeued after `UNISUBMIT_JOB_TIMEOUT_S` (35 minutes). `docker compose logs worker` says why it stopped |
+| "Parse & Index" returns at once and nothing seems to happen | Expected since v10.2: the worker parses and then indexes the guideline, and the guideline page refreshes until both have finished ([DEF-038](defects/DEF-038.md)) |
 | Uploading a revised version says the submission is still being validated | Expected while its job is queued or running ([DEF-026](defects/DEF-026.md)) |
 
 To show the demo on another device, change the `app` port mapping in
