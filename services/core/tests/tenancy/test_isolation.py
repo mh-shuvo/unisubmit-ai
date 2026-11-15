@@ -10,7 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from factories import PASSWORD, add_version, build_world, pdf_bytes
 from support import AppTestCase
 from unisubmit import queries
-from unisubmit.models import AdminRole, AdminUser, Department, StudentUser, Teacher
+from unisubmit.models import (
+    AdminRole,
+    AdminUser,
+    Department,
+    JobStatus,
+    StudentUser,
+    Teacher,
+)
 from unisubmit.tenancy import create_platform_admin, set_university_active
 
 PLATFORM_PASSWORD = "a long chosen passphrase"
@@ -135,10 +142,10 @@ class SubmissionTests(TwoUniversities):
 
     def test_unit_admin_sees_only_its_own_universitys_queue(self):
         with self.Session() as db:
-            add_version(db, self.world.submission_id, self.tmp, "QUEUED")
-            mine = add_version(db, self.other.submission_id, self.tmp, "QUEUED")
+            add_version(db, self.world.submission_id, self.tmp, JobStatus.QUEUED)
+            mine = add_version(db, self.other.submission_id, self.tmp, JobStatus.QUEUED)
             admin = db.get(AdminUser, self.other.admin_id)
-            ids = [job.id for job in queries.unit_jobs(db, admin)]
+            ids = [job.id for job, _, _ in queries.unit_jobs(db, admin)]
         self.assertEqual(ids, [mine])
 
     def test_student_cannot_choose_another_universitys_supervisor(self):
@@ -157,7 +164,7 @@ class SubmissionTests(TwoUniversities):
     def test_uploads_are_stored_in_the_universitys_folder(self):
         """P2.9: files live under <root>/<university id>/ and rows hold relative paths."""
         with self.Session() as db:
-            add_version(db, self.world.submission_id, self.tmp, "COMPLETED")
+            add_version(db, self.world.submission_id, self.tmp, JobStatus.SUCCEEDED)
         self.logged_in_student().post(
             f"/submission/{self.world.submission_id}/resubmit",
             files={"pdf": ("r.pdf", pdf_bytes("Revised"), "application/pdf")},

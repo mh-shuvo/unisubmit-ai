@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Guideline Version · UniSubmit AI{% endblock %}
+{% block head %}{% if job_active %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block content %}
 <div class="dashboard-shell">
 {% include '_admin_nav.html' %}
@@ -18,7 +19,8 @@
 
   <section class="panel">
     <div class="panel-head"><div><h2>Parse & Index Approved Guideline</h2><p>Re-indexing first parses the PDF into explicit rules, then updates the RAG knowledge base.</p></div><span class="badge {{'passed' if tv.format_profile_status=='Active' else 'pending'}}">{{tv.format_profile_status}}</span></div>
-    <div class="rag-box"><div><small>Qdrant collection</small><b>{{tv.rag_collection or 'Not created yet'}}</b></div><form method="post" action="/admin/template-version/{{tv.id}}/index"><button class="btn">{{'Re-parse & Re-index Guideline' if tv.rag_status=='Indexed' else 'Parse & Index Guideline'}}</button></form></div>
+    <div class="rag-box"><div><small>Qdrant collection</small><b>{{tv.rag_collection or 'Not created yet'}}</b></div><form method="post" action="/admin/template-version/{{tv.id}}/index"><button class="btn" {% if job_active %}disabled{% endif %}>{{'Re-parse & Re-index Guideline' if tv.rag_status=='Indexed' else 'Parse & Index Guideline'}}</button></form></div>
+    {% if job %}<div class="job-line"><span>Job #{{job.id}} · {{job.type|replace("_", " ")|capitalize}}</span><span class="badge {{job.status}}">{{job.status}}</span>{% if job_active %}<span>{{'Running, attempt ' ~ job.attempts if job.status == 'running' else 'Waiting for the worker'}}; this page refreshes every 10 seconds</span>{% elif job.status == 'failed' %}<span>{{job.last_error}}</span>{% endif %}</div>{% endif %}
   </section>
 
   {% set diag = parsed_profile.get('parser_diagnostics',{}) %}

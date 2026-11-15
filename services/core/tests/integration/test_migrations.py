@@ -47,9 +47,37 @@ def test_check_constraints_match_the_models(engine: sa.Engine, scratch_engine: s
         assert migrated.execute(CHECKS).all() == created.execute(CHECKS).all()
 
 
-def load_v9_14(engine: sa.Engine) -> None:
+# One department's submissions as v9.14 left them: free-text statuses, the
+# old queue and its history.
+DATA_V9_14 = """
+INSERT INTO faculties VALUES (1, 'Faculty of Science', 'SCI', true);
+INSERT INTO departments VALUES (1, 'Computer Science', 'CSE', 1, true);
+INSERT INTO programs VALUES (1, 'M.Sc. in CSE', 'MSC-CSE', 'Postgraduate', 1, NULL, true);
+INSERT INTO student_users VALUES
+    (1, 'Student', 'S-1', 's@example.edu', 'x', 1, NULL, true, true, '2026-11-01');
+INSERT INTO teachers VALUES (1, 'Supervisor', 'Professor', 't@example.edu', true, 1, NULL);
+INSERT INTO templates VALUES (1, 'Thesis', 'M.Sc. Thesis', 1);
+INSERT INTO template_versions VALUES (1, 1, '1.0', 'g.pdf', '', '', '', '', 'Active', '',
+    'tv_1', 'Indexed', '{"semantic_requirements": []}', 'Active', '2026-11-01');
+INSERT INTO submissions VALUES
+    (1, 1, 'First', 1, 1, 1, NULL, 'PASSED', 'Failed / SMTP not configured', '2026-11-01'),
+    (2, 1, 'Second', 1, 1, 1, NULL, 'QUEUED', 'Not Sent', '2026-11-02');
+INSERT INTO submission_versions VALUES
+    (1, 1, 1, 'a.pdf', '', 'PASSED', '[]', '', '', '', NULL, '2026-11-01 10:00'),
+    (2, 2, 1, 'b.pdf', '', 'Validation Failed', '[]', '', '', '', NULL, '2026-11-02 09:00'),
+    (3, 2, 2, 'c.pdf', '', 'QUEUED', '[]', '', '', '', NULL, '2026-11-02 10:00');
+INSERT INTO ai_jobs VALUES
+    (1, 1, 'COMPLETED', 100, 1, '', '2026-11-01 10:00', '2026-11-01 10:01', '2026-11-01 10:07'),
+    (2, 2, 'FAILED', 100, 3, 'AI down', '2026-11-02 09:00', '2026-11-02 09:20', '2026-11-02 09:30'),
+    (3, 3, 'PROCESSING', 100, 1, '', '2026-11-02 10:00', '2026-11-02 10:01', NULL);
+"""
+
+
+def load_v9_14(engine: sa.Engine, data: str = "") -> None:
     with engine.begin() as connection:
         connection.exec_driver_sql(SCHEMA_V9_14.read_text())
+        if data:
+            connection.exec_driver_sql(data)
 
 
 def schema_state(engine: sa.Engine) -> tuple[str | None, list[str]]:
@@ -74,7 +102,7 @@ def test_v9_14_database_is_adopted_and_upgraded(scratch_engine: sa.Engine) -> No
     migrate(scratch_engine)
 
     assert schema_state(scratch_engine) == (
-        "0002",
+        "0003",
         [
             "fk_teachers_department_id_departments",
             "fk_teachers_institute_id_institutes",
@@ -83,6 +111,53 @@ def test_v9_14_database_is_adopted_and_upgraded(scratch_engine: sa.Engine) -> No
             "uq_teachers_university_id_email",
         ],
     )
+
+
+def test_v9_14_queue_history_is_copied_into_jobs(scratch_engine: sa.Engine) -> None:
+    """P3.7: old jobs keep their ids; one stopped mid-run is queued again."""
+    load_v9_14(scratch_engine, DATA_V9_14)
+
+    migrate(scratch_engine)
+
+    with scratch_engine.connect() as connection:
+        jobs = connection.execute(
+            sa.text(
+                "SELECT id, type, status, subject_key, payload, attempts, last_error, "
+                "nextval(pg_get_serial_sequence('jobs', 'id')) > 3 FROM jobs ORDER BY id"
+            )
+        ).all()
+    assert [tuple(job) for job in jobs] == [
+        (
+            1,
+            "validate_submission",
+            "succeeded",
+            "submission:1",
+            {"submission_version_id": 1},
+            1,
+            None,
+            True,
+        ),
+        (
+            2,
+            "validate_submission",
+            "failed",
+            "submission:2",
+            {"submission_version_id": 2},
+            3,
+            "AI down",
+            True,
+        ),
+        (
+            3,
+            "validate_submission",
+            "queued",
+            "submission:2",
+            {"submission_version_id": 3},
+            1,
+            None,
+            True,
+        ),
+    ]
 
 
 def test_database_that_differs_from_the_models_is_left_unchanged(

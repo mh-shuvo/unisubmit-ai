@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     smtp_password: SecretStr = SecretStr("")
     smtp_from: str = "unisubmit@example.edu"
     smtp_use_tls: bool = True
+    # A job that keeps failing for a transient reason stops after this many attempts.
+    max_job_attempts: int = 3
+    # A job running longer than this belongs to a worker that died, and is requeued.
+    # It must exceed the longest AI call: semantic validation's 1,800 s (DEF-034).
+    job_timeout_s: int = 2100
 
     @field_validator("secret_key", "ai_service_token")
     @classmethod

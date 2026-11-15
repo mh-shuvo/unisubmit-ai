@@ -4,16 +4,16 @@ A University Admin sees one university; a unit admin and a student see one
 department or institute, which itself belongs to one university.
 """
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
     AdminRole,
     AdminUser,
-    AIJob,
     Department,
     Faculty,
     Institute,
+    Job,
     Program,
     StudentUser,
     Submission,
@@ -126,17 +126,30 @@ def unit_submissions(db: Session, admin: AdminUser) -> list[Submission]:
     )
 
 
-def unit_jobs(db: Session, admin: AdminUser) -> list[AIJob]:
+QUEUE_PAGE_ROWS = 200
+
+
+def unit_jobs(
+    db: Session, admin: AdminUser
+) -> list[tuple[Job, SubmissionVersion | None, TemplateVersion | None]]:
+    """The unit's latest jobs, each with the submission version or guideline it works on."""
     unit = _in_unit(Program, admin)
     if unit is None:
         return []
-    return list(
-        db.scalars(
-            select(AIJob)
-            .join(SubmissionVersion, AIJob.submission_version_id == SubmissionVersion.id)
-            .join(Submission, SubmissionVersion.submission_id == Submission.id)
-            .join(Program, Submission.program_id == Program.id)
-            .where(unit, Submission.university_id == admin.university_id)
-            .order_by(AIJob.created_at.desc())
+    rows = db.execute(
+        select(Job, SubmissionVersion, TemplateVersion)
+        .outerjoin(
+            SubmissionVersion,
+            SubmissionVersion.id == Job.payload["submission_version_id"].as_integer(),
         )
+        .outerjoin(Submission, Submission.id == SubmissionVersion.submission_id)
+        .outerjoin(
+            TemplateVersion, TemplateVersion.id == Job.payload["template_version_id"].as_integer()
+        )
+        .outerjoin(Template, Template.id == TemplateVersion.template_id)
+        .join(Program, Program.id == func.coalesce(Submission.program_id, Template.program_id))
+        .where(unit, Job.university_id == admin.university_id)
+        .order_by(Job.id.desc())
+        .limit(QUEUE_PAGE_ROWS)
     )
+    return [(job, version, guideline) for job, version, guideline in rows]

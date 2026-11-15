@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}UniSubmit AI{% endblock %}</title><link rel="stylesheet" href="/static/style.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}UniSubmit AI{% endblock %}</title><link rel="stylesheet" href="/static/style.css">{% block head %}{% endblock %}</head><body>
 {% set student_signed_in = request.session.get('student_id') %}
 {% set admin_signed_in = request.session.get('admin_id') %}
 <header class="topbar {% if student_signed_in or admin_signed_in %}private-topbar{% endif %}">

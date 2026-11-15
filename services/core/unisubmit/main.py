@@ -15,27 +15,19 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import queries, storage, tenancy
-from .ai_service_client import (
-    health as ai_health,
-)
-from .ai_service_client import (
-    index_template,
-    parse_guideline_profile,
-    rag_validate,
-)
+from . import queries, queue, storage, tenancy
+from .ai_service_client import health as ai_health
 from .core.config import get_settings
 from .core.db import DbSession, create_db_engine, make_session_factory
-from .emailer import send_submission_email
-from .format_validation import validate_all_profile_rules
 from .models import (
+    ACTIVE_JOB_STATUSES,
     AdminRole,
     AdminUser,
-    AIJob,
     AIProfile,
     Department,
     Faculty,
     Institute,
+    JobType,
     Program,
     StudentUser,
     Submission,
@@ -50,7 +42,6 @@ from .pdf_utils import PDFError, inspect_pdf
 from .report_parser import inline_markdown_html, parse_ai_report
 from .reporting import build_validation_report
 from .security import hash_password, verify_password
-from .validators import run_rules
 
 PACKAGE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
@@ -640,7 +631,13 @@ def super_ai(request: Request, db: DbSession):
     return templates.TemplateResponse(
         request,
         "super_ai.html",
-        {"request": request, "admin": u, "status": status, "profiles": profiles},
+        {
+            "request": request,
+            "admin": u,
+            "status": status,
+            "profiles": profiles,
+            "queue": queue.metrics(db),
+        },
     )
 
 
@@ -1022,6 +1019,7 @@ def template_version_page(version_id: int, request: Request, db: DbSession):
     except Exception:
         parsed_profile = {}
     parsed_profile = _normalize_profile_severities(parsed_profile)
+    job = queue.latest_job(db, f"template_version:{tv.id}")
     return templates.TemplateResponse(
         request,
         "template_version.html",
@@ -1029,6 +1027,8 @@ def template_version_page(version_id: int, request: Request, db: DbSession):
             "request": request,
             "admin": u,
             "tv": tv,
+            "job": job,
+            "job_active": job is not None and job.status in ACTIVE_JOB_STATUSES,
             "parsed_profile": parsed_profile,
             "message": request.query_params.get("message", ""),
             "error": request.query_params.get("error", ""),
@@ -1362,131 +1362,36 @@ def add_restriction(
 
 
 @router.post("/admin/template-version/{version_id}/index")
-async def index_guideline(version_id: int, request: Request, db: DbSession):
+def index_guideline(version_id: int, request: Request, db: DbSession):
+    """Queue parsing, which queues indexing when it succeeds; the worker runs
+    both, so the request never waits on the model (DEF-038)."""
     u = require_admin(request, db)
     tv = db.get(TemplateVersion, version_id)
     if not tv or u.role != AdminRole.UNIT_ADMIN or not same_unit(tv.template.program, u):
         raise HTTPException(403)
-    p = tv.template.program
-
-    # v9.1: guideline-first means parse the approved PDF BEFORE RAG indexing.
-    profile = (
-        db.query(AIProfile)
-        .filter(
-            AIProfile.program_id == p.id,
-            AIProfile.submission_type == tv.template.submission_type,
-        )
-        .first()
-    )
-    if not profile:
-        profile = AIProfile(
-            program_id=p.id,
-            submission_type=tv.template.submission_type,
-            service_url=get_settings().ai_service_url,
-            status="Active",
-        )
-        db.add(profile)
-        db.flush()
-    parse_fields = {
-        "department": p.unit_name,
-        "program": p.name,
-        "submission_type": tv.template.submission_type,
-        "template_version": tv.version,
-        "base_model": profile.base_model,
-    }
-    parsed_profile = await parse_guideline_profile(
-        get_settings().ai_service_url, parse_fields, str(storage.resolve(tv.pdf_path))
-    )
-    if parsed_profile.get("status") != "success":
-        tv.format_profile_json = "{}"
-        tv.format_profile_status = "Parsing Failed"
-        db.commit()
-        detail = parsed_profile.get("detail", "Unknown parser error")
+    page = f"/admin/template-version/{version_id}"
+    subject = f"template_version:{tv.id}"
+    # A double-click waits here, then finds the first click's job.
+    db.query(TemplateVersion).filter(TemplateVersion.id == tv.id).with_for_update().one()
+    if queue.has_active_job(db, subject):
+        db.rollback()
         return RedirectResponse(
-            flash_url(
-                f"/admin/template-version/{version_id}",
-                error=f"Guideline parsing failed: {detail}",
-            ),
+            flash_url(page, error="This guideline is already queued for parsing and indexing"),
             303,
         )
-
-    # Preserve administrator-authored semantic rules across guideline re-parsing.
-    try:
-        previous = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        previous = {}
-    manual_semantic = [
-        dict(r)
-        for r in (previous.get("semantic_requirements") or [])
-        if isinstance(r, dict) and r.get("manual")
-    ]
-    previous_audit = list(previous.get("review_audit") or [])
-    parsed = parsed_profile.get("profile") or {
-        "deterministic_rules": [],
-        "semantic_requirements": [],
-    }
-    parsed.setdefault("semantic_requirements", []).extend(manual_semantic)
-    if previous_audit:
-        parsed["review_audit"] = previous_audit[-100:]
-    parsed = _normalize_profile_severities(parsed)
-    tv.format_profile_json = json.dumps(parsed)
-    rule_count = len(parsed.get("deterministic_rules", [])) + len(
-        parsed.get("semantic_requirements", [])
+    queue.enqueue(
+        db,
+        JobType.PARSE_GUIDELINE,
+        subject,
+        {"template_version_id": tv.id},
+        university_id=u.university_id,
     )
-    tv.format_profile_status = (
-        "Parsed - Review Required" if rule_count else "Parsed - No Explicit Rules Found"
-    )
-    db.flush()
-
-    # Index the same approved guideline after parsing so RAG supports grounded semantic validation.
-    fields = {
-        "department": p.unit_name,
-        "program": p.name,
-        "submission_type": tv.template.submission_type,
-        "template_version": tv.version,
-        # Named by id: display names are not unique and slugify alike (DEF-032).
-        "collection": f"tv_{tv.id}",
-        # Stored in every point's payload, for auditing which tenant owns it (P2.10).
-        "university_id": str(u.university_id),
-        "recreate": "true",
-    }
-    result = await index_template(
-        get_settings().ai_service_url, fields, str(storage.resolve(tv.pdf_path))
-    )
-    if result.get("status") == "success" and tv.additional_rules_pdf_path:
-        extra_fields = dict(fields)
-        extra_fields["recreate"] = "false"
-        extra_result = await index_template(
-            get_settings().ai_service_url,
-            extra_fields,
-            str(storage.resolve(tv.additional_rules_pdf_path)),
-        )
-        if extra_result.get("status") != "success":
-            result = {
-                "status": "error",
-                "detail": "Primary guideline indexed but additional rules indexing failed",
-            }
-
-    if result.get("status") == "success":
-        tv.rag_status = "Indexed"
-        tv.rag_collection = result.get("collection", "")
-        profile.rag_collection = tv.rag_collection
-        profile.status = "Active"
-        db.commit()
-        if rule_count:
-            msg = f"Guideline parsed first ({rule_count} explicit requirements), then indexed into RAG. Review and activate the parsed rules."
-        else:
-            msg = "Guideline parsed first, but no explicit rules were extracted. RAG indexing succeeded; review the parser diagnostics."
-        return RedirectResponse(
-            flash_url(f"/admin/template-version/{version_id}", message=msg), 303
-        )
-
-    tv.rag_status = "Index Failed"
     db.commit()
     return RedirectResponse(
         flash_url(
-            f"/admin/template-version/{version_id}",
-            error=f"Guideline parsing succeeded, but RAG indexing failed: {result.get('detail', 'Unknown indexing error')}",
+            page,
+            message="Queued: the guideline is parsed first, then indexed. "
+            "This page refreshes until both have finished.",
         ),
         303,
     )
@@ -1508,7 +1413,7 @@ def unit_queue(request: Request, db: DbSession):
     return templates.TemplateResponse(
         request,
         "unit_queue.html",
-        {"request": request, "admin": u, "jobs": queries.unit_jobs(db, u)},
+        {"request": request, "admin": u, "rows": queries.unit_jobs(db, u)},
     )
 
 
@@ -1633,9 +1538,6 @@ def resubmit(
     return RedirectResponse(f"/submission/{sub.id}", 303)
 
 
-ACTIVE_JOB_STATUSES = ("QUEUED", "RETRYING", "PROCESSING")
-
-
 def save_queue_version(sub, pdf, db):
     """Store an uploaded PDF as the next version and queue it.
 
@@ -1647,16 +1549,8 @@ def save_queue_version(sub, pdf, db):
         raise HTTPException(400, "Only PDF files are allowed")
     # Concurrent uploads for this submission wait here, one at a time.
     db.query(Submission).filter(Submission.id == sub.id).with_for_update().one()
-    active = (
-        db.query(AIJob.id)
-        .join(SubmissionVersion, AIJob.submission_version_id == SubmissionVersion.id)
-        .filter(
-            SubmissionVersion.submission_id == sub.id,
-            AIJob.status.in_(ACTIVE_JOB_STATUSES),
-        )
-        .first()
-    )
-    if active:
+    subject = f"submission:{sub.id}"
+    if queue.has_active_job(db, subject):
         db.rollback()
         return None
     version_no = (
@@ -1688,7 +1582,13 @@ def save_queue_version(sub, pdf, db):
     db.flush()
     # One commit: committing the version first released the lock before its
     # job existed, and a second upload in that gap saw no active job (DEF-046).
-    db.add(AIJob(submission_version_id=sv.id, status="QUEUED"))
+    queue.enqueue(
+        db,
+        JobType.VALIDATE_SUBMISSION,
+        subject,
+        {"submission_version_id": sv.id},
+        university_id=sub.university_id,
+    )
     db.commit()
     return sv
 
@@ -1830,7 +1730,7 @@ def download_report_bound(
     )
 
 
-# ---------- validation job (run by app/worker.py) ----------
+# ---------- validation job (run by the worker, see handlers.py) ----------
 def semantic_validation_payload(program, tv, fmt_profile, student_text, base_model):
     """The /rag/validate request for one document; tools/measure_validation.py sends the same."""
     return {
@@ -1854,80 +1754,6 @@ def semantic_validation_payload(program, tv, fmt_profile, student_text, base_mod
             else []
         ),
     }
-
-
-async def process_job(db, job):
-    sv = job.submission_version
-    sub = sv.submission
-    tv = sub.template_version
-    info = inspect_pdf(str(storage.resolve(sv.pdf_path)))
-    results, det_status = run_rules(tv.rules, info)
-    try:
-        fmt_profile = json.loads(tv.format_profile_json or "{}")
-    except Exception:
-        fmt_profile = {}
-    fmt_profile = _normalize_profile_severities(fmt_profile)
-    format_results = (
-        validate_all_profile_rules(fmt_profile, info)
-        if tv.format_profile_status == "Active"
-        else []
-    )
-    results = format_results + results
-    format_failed = any(
-        r.get("category") == "Formatting Compliance"
-        and r.get("severity") == "Mandatory"
-        and r.get("status") == "FAIL"
-        for r in format_results
-    )
-    ai_text = "AI validation unavailable."
-    ai_ref = ""
-    final_status = "REVISION REQUIRED" if format_failed else det_status
-    if sub.ai_profile and tv.rag_status == "Indexed":
-        payload = semantic_validation_payload(
-            sub.program, tv, fmt_profile, info["text"], sub.ai_profile.base_model
-        )
-        # One AI service per installation: a URL stored on an old profile row
-        # must not override the configured one (DEF-035).
-        ai = await rag_validate(get_settings().ai_service_url, payload)
-        if not ai:
-            raise RuntimeError("AI service unavailable or RAG validation failed")
-        ai_text = ai.get("response", "")
-        ai_ref = ai.get("run_id", "")
-        semantic_results = ai.get("semantic_results") or []
-        results.extend(semantic_results)
-        if any(
-            r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in semantic_results
-        ):
-            final_status = "REVISION REQUIRED"
-    elif sub.ai_profile:
-        ai_text = "Guideline has not been indexed into the AI knowledge base yet. Additional deterministic restrictions were checked."
-    stats = _profile_rule_stats(fmt_profile, results, tv.rules)
-    results.append({"category": "Validation Statistics", "status": "META", "statistics": stats})
-    sv.validation_json = json.dumps(results)
-    sv.ai_suggestions = ai_text
-    sv.ai_run_reference = ai_ref
-    sv.status = final_status
-    sub.status = final_status
-    run_token = _report_run_token(sv)
-    report = (
-        storage.directory(sub.university_id, "reports")
-        / f"validation_submission_{sub.id}_v{sv.version_no}_{run_token}.pdf"
-    )
-    build_validation_report(str(report), sub, sv, results, ai_text)
-    sv.report_path = storage.relative(report)
-    db.commit()
-    if final_status == "PASSED":
-        body = f"Student: {sub.student.name}\nStudent ID: {sub.student.student_id}\nProgram: {sub.program.name}\nSubmission: {tv.template.submission_type}\nTitle: {sub.title}\nTemplate Version: {tv.version}\nPre-Submission Validation: PASSED\nSubmission Version: {sv.version_no}\n\nThis is a pre-submission compliance check only and does not constitute academic approval."
-        ok, msg = send_submission_email(
-            sub.teacher.email,
-            f"Validated {tv.template.submission_type} Submission - {sub.student.name}",
-            body,
-            [str(storage.resolve(sv.pdf_path)), str(report)],
-        )
-        sub.email_status = "Sent" if ok else "Failed / SMTP not configured"
-        if ok:
-            sv.emailed_at = datetime.utcnow()
-        db.commit()
 
 
 async def friendly_http_error(request: Request, exc: HTTPException):

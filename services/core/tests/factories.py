@@ -9,10 +9,12 @@ import fitz
 from unisubmit.models import (
     AdminRole,
     AdminUser,
-    AIJob,
     AIProfile,
     Department,
     Faculty,
+    Job,
+    JobStatus,
+    JobType,
     Program,
     StudentUser,
     Submission,
@@ -142,8 +144,17 @@ def build_world(db, tmp: Path, slug: str = "test") -> SimpleNamespace:
     )
 
 
-def add_version(db, submission_id: int, tmp: Path, job_status: str, **job_fields) -> int:
-    """Add a submission version with its queue job; returns the job id."""
+# The version status each job status leaves behind.
+VERSION_STATUS = {
+    JobStatus.QUEUED: "QUEUED",
+    JobStatus.RUNNING: "PROCESSING",
+    JobStatus.SUCCEEDED: "PASSED",
+    JobStatus.FAILED: "Validation Failed",
+}
+
+
+def add_version(db, submission_id: int, tmp: Path, job_status: JobStatus, **job_fields) -> int:
+    """Add a submission version with its validation job; returns the job id."""
     number = db.query(SubmissionVersion).filter_by(submission_id=submission_id).count() + 1
     university_id = db.get(Submission, submission_id).university_id
     version = SubmissionVersion(
@@ -156,11 +167,18 @@ def add_version(db, submission_id: int, tmp: Path, job_status: str, **job_fields
             f"submission_{submission_id}_v{number}.pdf",
             f"Version {number}",
         ),
-        status=job_status,
+        status=VERSION_STATUS[job_status],
     )
     db.add(version)
     db.flush()
-    job = AIJob(submission_version_id=version.id, status=job_status, **job_fields)
+    job = Job(
+        university_id=university_id,
+        type=JobType.VALIDATE_SUBMISSION,
+        status=job_status,
+        subject_key=f"submission:{submission_id}",
+        payload={"submission_version_id": version.id},
+        **job_fields,
+    )
     db.add(job)
     db.commit()
     return job.id

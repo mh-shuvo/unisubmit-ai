@@ -28,25 +28,48 @@ def health(service_url: str) -> dict:
         return {"online": False, "error": str(e)}
 
 
+class AIServiceError(RuntimeError):
+    """A failed AI-service call. `transient` when a retry may succeed: the
+    service was unreachable, timed out or answered 429, 502, 503 or 504."""
+
+    def __init__(self, message: str, *, transient: bool) -> None:
+        super().__init__(message)
+        self.transient = transient
+
+
+TRANSIENT_STATUSES = {429, 502, 503, 504}
+
+
+def _service_error(action: str, exc: httpx.HTTPError) -> AIServiceError:
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            detail = exc.response.json().get("detail", "No service error detail")
+        except (ValueError, AttributeError):
+            detail = "Non-JSON error response; inspect the AI service log"
+        code = exc.response.status_code
+        logger.error("%s HTTP %s: %s", action, code, detail)
+        return AIServiceError(
+            f"{action} HTTP {code}: {detail}", transient=code in TRANSIENT_STATUSES
+        )
+    logger.error("%s request failed: %s: %s", action, type(exc).__name__, exc)
+    return AIServiceError(
+        f"{action} request failed: {type(exc).__name__}: {exc}",
+        transient=isinstance(exc, httpx.TransportError),
+    )
+
+
 async def rag_validate(service_url: str, payload: dict):
     try:
         async with httpx.AsyncClient(timeout=RAG_VALIDATE_TIMEOUT, headers=_auth()) as c:
             r = await c.post(service_url.rstrip("/") + "/rag/validate", json=payload)
             r.raise_for_status()
             return r.json()
-    except httpx.HTTPStatusError as exc:
-        try:
-            detail = exc.response.json().get("detail", "No service error detail")
-        except (ValueError, AttributeError):
-            detail = "Non-JSON error response; inspect the AI service log"
-        logger.error("AI validation HTTP %s: %s", exc.response.status_code, detail)
-        raise RuntimeError(f"AI validation HTTP {exc.response.status_code}: {detail}") from exc
-    except Exception as exc:
-        logger.exception("AI validation request failed")
-        raise RuntimeError(f"AI validation request failed: {type(exc).__name__}: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise _service_error("AI validation", exc) from exc
 
 
 async def index_template(service_url: str, fields: dict, pdf_path: str):
+    """Raises AIServiceError when the call fails."""
     try:
         async with httpx.AsyncClient(timeout=300, headers=_auth()) as c:
             with open(pdf_path, "rb") as f:
@@ -57,8 +80,8 @@ async def index_template(service_url: str, fields: dict, pdf_path: str):
                 )
             r.raise_for_status()
             return r.json()
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
+    except httpx.HTTPError as exc:
+        raise _service_error("Guideline indexing", exc) from exc
 
 
 async def extract_format_profile(service_url: str, payload: dict):
@@ -72,6 +95,7 @@ async def extract_format_profile(service_url: str, payload: dict):
 
 
 async def parse_guideline_profile(service_url: str, fields: dict, pdf_path: str):
+    """Raises AIServiceError when the call fails."""
     try:
         async with httpx.AsyncClient(timeout=1500, headers=_auth()) as c:
             with open(pdf_path, "rb") as f:
@@ -82,5 +106,5 @@ async def parse_guideline_profile(service_url: str, fields: dict, pdf_path: str)
                 )
             r.raise_for_status()
             return r.json()
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
+    except httpx.HTTPError as exc:
+        raise _service_error("Guideline parsing", exc) from exc

@@ -1,17 +1,21 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .core.config import get_settings
@@ -316,12 +320,66 @@ class SubmissionVersion(Base):
     emailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     submission = relationship("Submission", back_populates="versions")
-    job = relationship(
-        "AIJob", back_populates="submission_version", uselist=False, cascade="all, delete-orphan"
+
+
+class JobType(StrEnum):
+    VALIDATE_SUBMISSION = "validate_submission"
+    PARSE_GUIDELINE = "parse_guideline"
+    INDEX_GUIDELINE = "index_guideline"
+    SEND_EMAIL = "send_email"
+
+
+class JobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+ACTIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
+
+
+class Job(Base):
+    """Background work for `python -m unisubmit.worker`; see `queue.py` (P3.1).
+
+    `subject_key` names what the job works on, e.g. "submission:42", and the
+    database allows one active job per subject. The payload holds IDs only.
+    """
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_claimable", "priority", "id", postgresql_where=text("status = 'queued'")),
+        Index("ix_jobs_university_locked", "university_id", "locked_at"),
+        Index(
+            "uq_jobs_one_active_per_subject",
+            "subject_key",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
     )
+    # Server defaults (run_after, created_at) are read back on insert.
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    university_id: Mapped[int] = mapped_column(ForeignKey("universities.id"))
+    type: Mapped[JobType] = mapped_column(str_enum(JobType))
+    status: Mapped[JobStatus] = mapped_column(str_enum(JobStatus), default=JobStatus.QUEUED)
+    subject_key: Mapped[str] = mapped_column(String(100))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    locked_by: Mapped[str | None] = mapped_column(String(100))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)  # for admins, never shown to students
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AIJob(Base):
+    """The pre-v10.2 validation queue. Migration 0003 copied it into `jobs`;
+    nothing reads or writes it, and a later release drops it (P3.7)."""
+
     __tablename__ = "ai_jobs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     submission_version_id: Mapped[int] = mapped_column(
@@ -334,4 +392,3 @@ class AIJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    submission_version = relationship("SubmissionVersion", back_populates="job")

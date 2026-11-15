@@ -8,6 +8,7 @@ DEF-032: Qdrant collections were named from display names, which collide.
 DEF-034: a job interrupted mid-run stayed PROCESSING forever.
 DEF-035: a stale per-profile AI service URL overrode the configured one.
 DEF-036: the worker swallowed failures, so a broken job vanished from the logs.
+DEF-038: guideline parsing and indexing ran inside the admin's HTTP request.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ import os
 import threading
 import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -27,23 +28,33 @@ from starlette.datastructures import UploadFile
 
 from factories import add_version, build_world, pdf_bytes
 from support import AppTestCase
+from unisubmit import handlers, queue
 from unisubmit import main as web
+from unisubmit.ai_service_client import AIServiceError
 from unisubmit.core.config import get_settings
 from unisubmit.core.db import get_session
-from unisubmit.models import AdminUser, AIJob, Submission, SubmissionVersion
+from unisubmit.models import (
+    AdminUser,
+    Job,
+    JobStatus,
+    JobType,
+    Submission,
+    SubmissionVersion,
+    TemplateVersion,
+)
 
 
 class WebProcessTests(AppTestCase):
     def test_web_startup_does_not_run_validation_jobs(self):
         """DEF-024: only the separate worker process may take jobs off the queue."""
         with self.Session() as db:
-            job_id = add_version(db, self.world.submission_id, self.tmp, "QUEUED")
+            job_id = add_version(db, self.world.submission_id, self.tmp, JobStatus.QUEUED)
 
         with self.client():
             time.sleep(0.5)
 
         with self.Session() as db:
-            self.assertEqual(db.get(AIJob, job_id).status, "QUEUED")
+            self.assertEqual(db.get(Job, job_id).status, JobStatus.QUEUED)
 
     def test_web_startup_does_not_create_an_admin_account(self):
         """DEF-028: no account with a published password appears on startup."""
@@ -58,19 +69,14 @@ class WebProcessTests(AppTestCase):
             self.assertEqual(db.query(AdminUser).count(), 0)
 
     def test_async_routes_do_not_use_the_database_on_the_event_loop(self):
-        """DEF-025: a route that holds a sync session must be a plain `def`.
-
-        `index_guideline` still awaits the AI service for minutes inside the
-        request; moving that work to the queue is DEF-038.
-        """
-        allowed = {"index_guideline"}
+        """DEF-025 and DEF-038: a route that holds a sync session must be a plain
+        `def`, and none may wait on the AI service."""
         offenders = sorted(
             route.endpoint.__name__
             for route in web.router.routes
             if isinstance(route, APIRoute)
             and inspect.iscoroutinefunction(route.endpoint)
             and any(dep.call is get_session for dep in route.dependant.dependencies)
-            and route.endpoint.__name__ not in allowed
         )
         self.assertEqual(offenders, [])
 
@@ -94,7 +100,7 @@ class UploadTests(AppTestCase):
     def test_upload_while_validation_active_creates_no_version(self):
         """DEF-026: a second click while a job is queued must not add a version."""
         with self.Session() as db:
-            add_version(db, self.world.submission_id, self.tmp, "QUEUED")
+            add_version(db, self.world.submission_id, self.tmp, JobStatus.QUEUED)
 
         response = self.upload(self.logged_in_student())
 
@@ -103,7 +109,7 @@ class UploadTests(AppTestCase):
 
     def test_upload_after_validation_finished_creates_next_version(self):
         with self.Session() as db:
-            add_version(db, self.world.submission_id, self.tmp, "COMPLETED")
+            add_version(db, self.world.submission_id, self.tmp, JobStatus.SUCCEEDED)
 
         self.upload(self.logged_in_student())
 
@@ -121,7 +127,7 @@ class ConcurrentUploadTests(unittest.TestCase):
     def setUp(self):
         with self.Session() as db:
             self.world = build_world(db, self.tmp)
-            add_version(db, self.world.submission_id, self.tmp, "COMPLETED")
+            add_version(db, self.world.submission_id, self.tmp, JobStatus.SUCCEEDED)
 
     def test_concurrent_uploads_never_share_a_version_number(self):
         barrier = threading.Barrier(2)
@@ -160,17 +166,39 @@ class ConcurrentUploadTests(unittest.TestCase):
         self.assertEqual(sorted(numbers), [1, 2])
 
 
+class FakeHandler:
+    """Stands in for a real handler; `run` is an AsyncMock."""
+
+    def __init__(self, run=None):
+        self.run = run or AsyncMock(return_value=[])
+        self.final_failures = []
+
+    def on_final_failure(self, payload):
+        self.final_failures.append(payload)
+
+
 class WorkerTests(AppTestCase):
     def setUp(self):
         super().setUp()
         from unisubmit import worker
 
         self.worker = worker
+        self.handler = FakeHandler()
+
+    def run_once(self):
+        handlers = {JobType.VALIDATE_SUBMISSION: self.handler}
+        return asyncio.run(
+            self.worker.run_once(self.Session, handlers, get_settings(), "test-worker")
+        )
+
+    def queued(self):
+        with self.Session() as db:
+            return add_version(db, self.world.submission_id, self.tmp, JobStatus.QUEUED)
 
     def job(self, job_id):
         with self.Session() as db:
-            job = db.get(AIJob, job_id)
-            return job.status, job.attempt_count, job.error_message
+            job = db.get(Job, job_id)
+            return job.status, job.attempts, job.last_error
 
     def test_worker_waits_for_the_schema_instead_of_creating_it(self):
         """DEF-045: two processes creating tables at once crashed the worker."""
@@ -196,30 +224,29 @@ class WorkerTests(AppTestCase):
         self.assertEqual(sa_inspect(empty).get_table_names(), [])
 
     def test_worker_completes_a_queued_job(self):
-        with self.Session() as db:
-            job_id = add_version(db, self.world.submission_id, self.tmp, "QUEUED")
+        job_id = self.queued()
 
-        with patch.object(self.worker, "process_job", new=AsyncMock()):
-            ran = asyncio.run(self.worker.run_once(self.Session))
+        ran = self.run_once()
 
-        self.assertTrue(ran)
-        self.assertEqual(self.job(job_id)[:2], ("COMPLETED", 1))
+        self.assertEqual((ran, self.job(job_id)[:2]), (True, (JobStatus.SUCCEEDED, 1)))
 
-    def test_job_left_processing_by_a_dead_worker_is_requeued(self):
+    def test_job_left_running_by_a_dead_worker_is_requeued(self):
         """DEF-034: a job whose worker died is put back in the queue."""
-        long_ago = datetime.utcnow() - self.worker.STALE_AFTER - timedelta(minutes=1)
+        long_ago = datetime.now(UTC) - timedelta(seconds=get_settings().job_timeout_s + 60)
         with self.Session() as db:
             job_id = add_version(
                 db,
                 self.world.submission_id,
                 self.tmp,
-                "PROCESSING",
-                started_at=long_ago,
-                attempt_count=1,
+                JobStatus.RUNNING,
+                locked_at=long_ago,
+                attempts=1,
             )
-            requeued = self.worker.requeue_stale_jobs(db)
+        requeued = self.worker.requeue_stale_jobs(
+            self.Session, {JobType.VALIDATE_SUBMISSION: self.handler}, get_settings()
+        )
 
-        self.assertEqual((requeued, self.job(job_id)[0]), (1, "RETRYING"))
+        self.assertEqual((requeued, self.job(job_id)[0]), (1, JobStatus.QUEUED))
 
     def test_recently_started_job_is_not_requeued(self):
         """DEF-034: a job another worker is still running is left alone."""
@@ -228,81 +255,229 @@ class WorkerTests(AppTestCase):
                 db,
                 self.world.submission_id,
                 self.tmp,
-                "PROCESSING",
-                started_at=datetime.utcnow(),
-                attempt_count=1,
+                JobStatus.RUNNING,
+                locked_at=datetime.now(UTC),
+                attempts=1,
             )
-            self.worker.requeue_stale_jobs(db)
+        self.worker.requeue_stale_jobs(
+            self.Session, {JobType.VALIDATE_SUBMISSION: self.handler}, get_settings()
+        )
 
-        self.assertEqual(self.job(job_id)[0], "PROCESSING")
+        self.assertEqual(self.job(job_id)[0], JobStatus.RUNNING)
 
     def test_interrupted_job_is_requeued_without_using_an_attempt(self):
         """DEF-034: stopping the worker mid-job puts the job back, attempt uncounted."""
+        job_id = self.queued()
+        self.handler.run.side_effect = asyncio.CancelledError
+
+        with self.assertRaises(asyncio.CancelledError):
+            self.run_once()
+
+        self.assertEqual(self.job(job_id)[:2], (JobStatus.QUEUED, 0))
+
+    def test_permanent_failure_is_recorded_logged_and_not_retried(self):
+        """DEF-036: a failing job must not vanish; a corrupt input is not retried."""
+        job_id = self.queued()
+        self.handler.run.side_effect = ValueError("not a PDF")
+
+        with self.assertLogs("unisubmit.worker", level="ERROR"):
+            self.run_once()
+
+        self.assertEqual(
+            (self.job(job_id), len(self.handler.final_failures)),
+            ((JobStatus.FAILED, 1, "ValueError: not a PDF"), 1),
+        )
+
+    def test_transient_failure_is_retried_later(self):
+        job_id = self.queued()
+        self.handler.run.side_effect = queue.TransientError("AI service unreachable")
+
+        with self.assertLogs("unisubmit.worker", level="WARNING"):
+            self.run_once()
+
+        self.assertEqual((self.job(job_id)[0], self.handler.final_failures), (JobStatus.QUEUED, []))
+
+    def test_follow_up_is_queued_when_the_job_succeeds(self):
+        self.queued()
+        email = queue.FollowUp(JobType.SEND_EMAIL, "email:1", {"submission_version_id": 1})
+        self.handler.run.return_value = [email]
+
+        self.run_once()
+
         with self.Session() as db:
-            job_id = add_version(db, self.world.submission_id, self.tmp, "QUEUED")
+            subjects = [job.subject_key for job in db.query(Job).filter_by(type=JobType.SEND_EMAIL)]
+        self.assertEqual(subjects, ["email:1"])
 
-        interrupted = AsyncMock(side_effect=asyncio.CancelledError)
-        with patch.object(self.worker, "process_job", new=interrupted):
-            with self.assertRaises(asyncio.CancelledError):
-                asyncio.run(self.worker.run_once(self.Session))
 
-        self.assertEqual(self.job(job_id)[:2], ("RETRYING", 0))
+class ValidationHandlerTests(AppTestCase):
+    """P3.4: the real validation handler, with the AI service and SMTP mocked."""
 
-    def test_failure_after_a_database_error_is_recorded_and_logged(self):
-        """DEF-036: a failed flush inside the job must not leave it PROCESSING silently."""
+    def setUp(self):
+        super().setUp()
         with self.Session() as db:
-            job_id = add_version(db, self.world.submission_id, self.tmp, "QUEUED")
+            job_id = add_version(db, self.world.submission_id, self.tmp, JobStatus.RUNNING)
+            self.payload = dict(db.get(Job, job_id).payload)
+        self.handler = handlers.ValidateSubmission(self.Session)
 
-        async def breaks_the_session(db, job):
-            # A second job for the same version violates the unique constraint.
-            db.add(AIJob(submission_version_id=job.submission_version_id))
-            db.flush()
+    def validate(self, rag):
+        with patch.object(handlers, "rag_validate", new=rag):
+            return asyncio.run(self.handler.run(self.payload))
 
-        with (
-            patch.object(self.worker, "process_job", new=breaks_the_session),
-            self.assertLogs("unisubmit.worker", level="ERROR"),
-        ):
-            asyncio.run(self.worker.run_once(self.Session))
+    def ok(self, **result):
+        return AsyncMock(
+            return_value={"response": "ok", "run_id": "r1", "semantic_results": [], **result}
+        )
 
-        status, attempts, error = self.job(job_id)
-        self.assertEqual((status, attempts), ("RETRYING", 1))
-        self.assertIn("UNIQUE", error.upper())
-
-
-class AIServiceRoutingTests(AppTestCase):
-    def validate_payload(self):
-        """Run the real process_job once and return what it sent to the AI service."""
+    def version(self):
         with self.Session() as db:
-            job_id = add_version(db, self.world.submission_id, self.tmp, "PROCESSING")
-        rag = AsyncMock(return_value={"response": "ok", "run_id": "r1", "semantic_results": []})
-        no_email = patch.object(web, "send_submission_email", return_value=(False, "test"))
-        with patch.object(web, "rag_validate", new=rag), no_email, self.Session() as db:
-            asyncio.run(web.process_job(db, db.get(AIJob, job_id)))
-        return rag.await_args.args
+            version = db.get(SubmissionVersion, self.payload["submission_version_id"])
+            return version.status, version.validation_json, version.submission.email_status
 
     def test_validation_uses_the_configured_ai_service_url(self):
         """DEF-035: the per-profile URL must not override AI_SERVICE_URL."""
-        url, _ = self.validate_payload()
-        self.assertEqual(url, get_settings().ai_service_url)
+        rag = self.ok()
+        self.validate(rag)
+        self.assertEqual(rag.await_args.args[0], get_settings().ai_service_url)
 
     def test_validation_sends_the_collection_recorded_at_indexing(self):
         """DEF-032: validation reads the collection indexing created, by name on record."""
-        _, payload = self.validate_payload()
-        self.assertEqual(payload.get("collection"), "tv_legacy_name")
+        rag = self.ok()
+        self.validate(rag)
+        self.assertEqual(rag.await_args.args[1].get("collection"), "tv_legacy_name")
 
-    def test_guideline_indexing_uses_the_configured_url_and_an_id_based_collection(self):
-        """DEF-032 and DEF-035, on the indexing path."""
-        parse = AsyncMock(return_value={"status": "success", "profile": {}})
-        index = AsyncMock(return_value={"status": "success", "collection": "ignored"})
+    def test_passed_validation_queues_the_supervisor_email(self):
+        """P3.6: the email is its own job, so an SMTP failure cannot fail validation."""
+        follow_ups = self.validate(self.ok())
+
+        self.assertEqual(
+            ([f.type for f in follow_ups], self.version()[0], self.version()[2]),
+            ([JobType.SEND_EMAIL], "PASSED", "Queued"),
+        )
+
+    def test_running_validation_again_overwrites_its_results(self):
+        self.validate(self.ok())
+        first = self.version()[1]
+
+        self.validate(self.ok())
+
+        self.assertEqual(self.version()[1], first)
+
+    def test_unreachable_ai_service_is_a_transient_failure(self):
+        down = AsyncMock(side_effect=AIServiceError("connection refused", transient=True))
+        with self.assertRaises(queue.TransientError):
+            self.validate(down)
+
+    def test_rejected_request_is_a_permanent_failure(self):
+        rejected = AsyncMock(side_effect=AIServiceError("HTTP 422", transient=False))
+        with self.assertRaises(AIServiceError):
+            self.validate(rejected)
+
+    def test_final_failure_marks_the_version_failed(self):
+        self.handler.on_final_failure(self.payload)
+        self.assertEqual(self.version()[0], "Validation Failed")
+
+
+class EmailHandlerTests(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        with self.Session() as db:
+            job_id = add_version(db, self.world.submission_id, self.tmp, JobStatus.SUCCEEDED)
+            version = db.get(
+                SubmissionVersion, db.get(Job, job_id).payload["submission_version_id"]
+            )
+            version.report_path = version.pdf_path  # any existing file serves as the report
+            db.commit()
+            self.payload = {"submission_version_id": version.id}
+        self.handler = handlers.SendSupervisorEmail(self.Session)
+
+    def send(self, result):
+        mock = patch.object(handlers, "send_submission_email", side_effect=result)
+        with mock as sent:
+            asyncio.run(self.handler.run(self.payload))
+        return sent
+
+    def email(self):
+        with self.Session() as db:
+            version = db.get(SubmissionVersion, self.payload["submission_version_id"])
+            return version.emailed_at is not None, version.submission.email_status
+
+    def test_sent_email_is_recorded(self):
+        self.send(lambda *args: (True, "Email sent."))
+        self.assertEqual(self.email(), (True, "Sent"))
+
+    def test_a_version_already_emailed_is_not_emailed_again(self):
+        self.send(lambda *args: (True, "Email sent."))
+        self.assertEqual(self.send(lambda *args: (True, "Email sent.")).call_count, 0)
+
+    def test_smtp_failure_is_retried_not_fatal(self):
+        def refused(*args):
+            raise ConnectionRefusedError("SMTP down")
+
+        with self.assertRaises(queue.TransientError):
+            self.send(refused)
+
+    def test_missing_smtp_configuration_is_recorded(self):
+        self.send(lambda *args: (False, "SMTP not configured. Email was not sent."))
+        self.assertEqual(self.email(), (False, "SMTP Not Configured"))
+
+
+class GuidelineJobTests(AppTestCase):
+    """DEF-038: parsing and indexing run in the worker, never in the request."""
+
+    def index_page(self):
         tv_id = self.world.template_version_id
-        with (
-            patch.object(web, "parse_guideline_profile", new=parse),
-            patch.object(web, "index_template", new=index),
-        ):
-            self.logged_in_admin().post(f"/admin/template-version/{tv_id}/index")
+        return self.logged_in_admin().post(f"/admin/template-version/{tv_id}/index")
 
-        self.assertEqual(parse.await_args.args[0], get_settings().ai_service_url)
-        self.assertEqual(index.await_args.args[1].get("collection"), f"tv_{tv_id}")
+    def jobs(self):
+        with self.Session() as db:
+            return [(job.type, job.status) for job in db.query(Job).order_by(Job.id)]
+
+    def test_parse_and_index_button_only_queues_a_job(self):
+        parse = AsyncMock()
+        with patch.object(handlers, "parse_guideline_profile", new=parse):
+            self.index_page()
+
+        self.assertEqual(
+            (self.jobs(), parse.await_count), ([(JobType.PARSE_GUIDELINE, JobStatus.QUEUED)], 0)
+        )
+
+    def test_second_click_while_queued_adds_no_job(self):
+        self.index_page()
+
+        response = self.index_page()
+
+        self.assertEqual((len(self.jobs()), "error=" in response.headers["location"]), (1, True))
+
+    def test_parsing_then_indexing_use_the_configured_url_and_an_id_based_collection(self):
+        """DEF-032 and DEF-035, on the indexing path."""
+        tv_id = self.world.template_version_id
+        payload = {"template_version_id": tv_id}
+        parse = AsyncMock(return_value={"status": "success", "profile": {}})
+        index = AsyncMock(return_value={"status": "success", "collection": f"tv_{tv_id}"})
+        with (
+            patch.object(handlers, "parse_guideline_profile", new=parse),
+            patch.object(handlers, "index_template", new=index),
+        ):
+            follow_ups = asyncio.run(handlers.ParseGuideline(self.Session).run(payload))
+            asyncio.run(handlers.IndexGuideline(self.Session).run(payload))
+
+        self.assertEqual(
+            (
+                [f.type for f in follow_ups],
+                parse.await_args.args[0],
+                index.await_args.args[1].get("collection"),
+            ),
+            ([JobType.INDEX_GUIDELINE], get_settings().ai_service_url, f"tv_{tv_id}"),
+        )
+
+    def test_failed_indexing_is_shown_on_the_guideline(self):
+        payload = {"template_version_id": self.world.template_version_id}
+
+        handlers.IndexGuideline(self.Session).on_final_failure(payload)
+
+        with self.Session() as db:
+            status = db.get(TemplateVersion, self.world.template_version_id).rag_status
+        self.assertEqual(status, "Index Failed")
 
 
 class AIClientAuthTests(unittest.TestCase):
