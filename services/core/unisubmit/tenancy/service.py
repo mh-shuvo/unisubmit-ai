@@ -9,9 +9,9 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import audit
-from .models import AdminRole, AdminUser, University
-from .security import hash_password
+from .. import audit
+from ..core.security import hash_password
+from ..models import AdminRole, AdminUser, University
 
 MIN_ADMIN_PASSWORD = 12
 MAX_SLUG = 60  # universities.slug

@@ -19,7 +19,7 @@ import structlog
 from factories import PASSWORD, add_version, pdf_bytes
 from support import AppTestCase, CsrfClient, api_routes
 from unisubmit import handlers
-from unisubmit import main as web
+from unisubmit.core.security import verify_csrf
 from unisubmit.models import (
     AdminUser,
     AuditEvent,
@@ -27,10 +27,11 @@ from unisubmit.models import (
     JobStatus,
     StudentUser,
     SubmissionVersion,
+    TemplateVersion,
     ValidationRule,
 )
 from unisubmit.pdf_utils import inspect_pdf, visible_text
-from unisubmit.security import verify_csrf
+from unisubmit.submissions import router as submission_pages
 
 STUDENT = {"email": "student@example.edu", "password": PASSWORD}
 
@@ -229,7 +230,7 @@ class ErrorPageTests(AppTestCase):
 
     def test_unexpected_error_shows_a_reference_and_hides_the_detail(self):
         """P4.6: the traceback goes to the log, the reference to the user."""
-        with patch.object(web, "queries") as broken:
+        with patch.object(submission_pages, "queries") as broken:
             broken.unit_programs.side_effect = RuntimeError("secret internal detail")
             client = CsrfClient(self.app, follow_redirects=False, raise_server_exceptions=False)
             client.post("/student/login", data=STUDENT)
@@ -331,7 +332,7 @@ class AuditTests(AppTestCase):
     def test_activating_parsed_rules_is_audited(self):
         tv_id = self.world.template_version_id
         with self.Session() as db:
-            guideline = db.get(web.TemplateVersion, tv_id)
+            guideline = db.get(TemplateVersion, tv_id)
             guideline.format_profile_json = {"deterministic_rules": [{"type": "font"}]}
             db.commit()
 

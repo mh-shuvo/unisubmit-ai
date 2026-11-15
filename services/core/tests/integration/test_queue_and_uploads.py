@@ -22,17 +22,15 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.routing import APIRoute
 from sqlalchemy import create_engine
-from starlette.datastructures import UploadFile
 
 from factories import add_version, build_world, pdf_bytes
-from support import AppTestCase
+from support import AppTestCase, api_routes
 from unisubmit import handlers, queue
-from unisubmit import main as web
 from unisubmit.ai_service_client import AIServiceError
 from unisubmit.core.config import get_settings
 from unisubmit.core.db import get_session
+from unisubmit.main import create_app
 from unisubmit.models import (
     AdminUser,
     Job,
@@ -42,6 +40,7 @@ from unisubmit.models import (
     SubmissionVersion,
     TemplateVersion,
 )
+from unisubmit.submissions.service import UploadRefused, save_queue_version
 
 
 class WebProcessTests(AppTestCase):
@@ -73,9 +72,8 @@ class WebProcessTests(AppTestCase):
         `def`, and none may wait on the AI service."""
         offenders = sorted(
             route.endpoint.__name__
-            for route in web.router.routes
-            if isinstance(route, APIRoute)
-            and inspect.iscoroutinefunction(route.endpoint)
+            for route in api_routes(create_app().routes)
+            if inspect.iscoroutinefunction(route.endpoint)
             and any(dep.call is get_session for dep in route.dependant.dependencies)
         )
         self.assertEqual(offenders, [])
@@ -137,11 +135,11 @@ class ConcurrentUploadTests(unittest.TestCase):
             with self.Session() as db:
                 submission = db.get(Submission, self.world.submission_id)
                 _ = submission.versions  # load before racing, as the route does
-                pdf = UploadFile(io.BytesIO(pdf_bytes("Concurrent")), filename="c.pdf")
+                pdf = io.BytesIO(pdf_bytes("Concurrent"))
                 barrier.wait()
                 try:
-                    web.save_queue_version(submission, pdf, db)
-                except web.UploadRefused:
+                    save_queue_version(submission, pdf, db)
+                except UploadRefused:
                     pass  # the loser is told the first upload is still being validated
                 except Exception as exc:  # recorded, asserted below
                     errors.append(exc)

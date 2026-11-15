@@ -31,7 +31,8 @@ target-version = "py313"
 # ASYNC: blocking calls in async code; DTZ: naive datetimes; S: security; PTH: pathlib
 # BLE: no blind `except Exception` unless it logs or re-raises (P4.6)
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "S", "ASYNC", "DTZ", "PTH", "RUF", "PL", "BLE"]
-ignore = ["PLR0913"]  # FastAPI endpoints legitimately take many parameters
+# FastAPI endpoints legitimately take many (positional) parameters
+ignore = ["PLR0913", "PLR0917"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI declares parameters through these calls in default arguments.
@@ -46,7 +47,6 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 "services/core/unisubmit/ai_service_client.py" = ["ASYNC230", "PTH123"]
 "services/core/unisubmit/config.py" = ["PLR2004"]
 "services/core/unisubmit/format_validation.py" = ["E501", "E741", "PLR0911", "PLR0912", "PLR0915", "PLR0917", "PLR1714", "PLR2004", "RUF001", "RUF059", "SIM103"]
-"services/core/unisubmit/main.py" = ["B904", "DTZ003", "E402", "E501", "E712", "PLC0415", "PLR0912", "PLR0915", "PLR0917", "PLR2004", "PLW2901", "RUF059", "S110", "SIM105"]
 "services/core/unisubmit/pdf_utils.py" = ["B904", "B905", "PLR0912", "PLR0915", "PLR2004", "RUF007"]
 "services/core/unisubmit/report_parser.py" = ["E501", "PLW2901"]
 "services/core/unisubmit/reporting.py" = ["E501", "PLR0912", "PLR0915"]
@@ -78,8 +78,6 @@ module = [
   "unisubmit.db",
   "unisubmit.emailer",
   "unisubmit.format_validation",
-  "unisubmit.main",
-  "unisubmit.models",
   "unisubmit.pdf_utils",
   "unisubmit.report_parser",
   "unisubmit.reporting",
@@ -116,6 +114,5 @@ layers = [
   "unisubmit.main : unisubmit.seed",
   "unisubmit.tenancy : unisubmit.queries : unisubmit.storage : unisubmit.queue",
   "unisubmit.audit",
-  "unisubmit.models",
   "unisubmit.core",
 ]

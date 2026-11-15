@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import fitz
 
+from unisubmit.core.security import hash_password
 from unisubmit.models import (
     AdminRole,
     AdminUser,
@@ -24,7 +25,6 @@ from unisubmit.models import (
     TemplateVersion,
     University,
 )
-from unisubmit.security import hash_password
 
 PASSWORD = "correct horse battery staple"
 

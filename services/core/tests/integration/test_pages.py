@@ -3,8 +3,8 @@
 from unittest.mock import patch
 
 from support import AppTestCase
-from unisubmit import main as web
-from unisubmit.tenancy import create_platform_admin
+from unisubmit.system import router as system_pages
+from unisubmit.tenancy.service import create_platform_admin
 
 PUBLIC = [
     "/",
@@ -32,7 +32,9 @@ PLATFORM_PASSWORD = "a long chosen passphrase"
 class PageRenderingTests(AppTestCase):
     def setUp(self):
         super().setUp()
-        offline = patch.object(web, "ai_health", return_value={"online": False, "error": "test"})
+        offline = patch.object(
+            system_pages, "ai_health", return_value={"online": False, "error": "test"}
+        )
         offline.start()
         self.addCleanup(offline.stop)
 

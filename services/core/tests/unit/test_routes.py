@@ -4,6 +4,8 @@ from support import api_routes
 from unisubmit.main import create_app
 
 ROUTES = {
+    ("GET", "/health/live"),  # added in Phase 5
+    ("GET", "/health/ready"),  # added in Phase 5
     ("GET", "/"),
     ("GET", "/admin"),
     ("GET", "/admin/admins"),

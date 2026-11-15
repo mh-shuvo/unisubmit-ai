@@ -18,7 +18,7 @@ from unisubmit.models import (
     StudentUser,
     Teacher,
 )
-from unisubmit.tenancy import create_platform_admin, set_university_active
+from unisubmit.tenancy.service import create_platform_admin, set_university_active
 
 PLATFORM_PASSWORD = "a long chosen passphrase"
 

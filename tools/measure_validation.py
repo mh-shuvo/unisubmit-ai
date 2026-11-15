@@ -25,9 +25,10 @@ from unisubmit.ai_service_client import health, rag_validate
 from unisubmit.core.config import get_settings
 from unisubmit.core.db import create_db_engine, make_session_factory
 from unisubmit.format_validation import validate_all_profile_rules
-from unisubmit.main import _normalize_profile_severities, semantic_validation_payload
+from unisubmit.guidelines.profile import normalize_profile_severities
 from unisubmit.models import TemplateVersion
 from unisubmit.pdf_utils import inspect_pdf
+from unisubmit.validation.semantic import semantic_validation_payload
 from unisubmit.validators import run_rules
 
 
@@ -59,7 +60,7 @@ def main() -> int:
             None,
         )
         model = args.model or (profile.base_model if profile else settings.ollama_model)
-        fmt_profile = _normalize_profile_severities(copy.deepcopy(tv.format_profile_json or {}))
+        fmt_profile = normalize_profile_severities(copy.deepcopy(tv.format_profile_json or {}))
 
         info, inspect_s = timed(inspect_pdf, str(args.pdf))
         started = time.perf_counter()

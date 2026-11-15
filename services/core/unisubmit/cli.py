@@ -30,7 +30,7 @@ from unisubmit.core.config import get_settings
 from unisubmit.core.db import Base, create_db_engine, make_session_factory
 from unisubmit.models import SubmissionVersion, TemplateVersion
 from unisubmit.seed import seed_demo_data
-from unisubmit.tenancy import TenancyError, create_platform_admin
+from unisubmit.tenancy.service import TenancyError, create_platform_admin
 
 # The revision that describes the schema `create_all` built before migrations.
 BASELINE = "0001"
@@ -114,11 +114,10 @@ def relocate_files(db: Session) -> tuple[int, int]:
     moved = missing = 0
     rows: list[tuple[object, str, int, storage.Kind]] = []
     for guideline in db.scalars(select(TemplateVersion)):
-        program = guideline.template.program
-        unit = program.department.faculty if program.department else program.institute
+        university_id = guideline.template.program.unit_university_id
         rows += [
-            (guideline, "pdf_path", unit.university_id, "guidelines"),
-            (guideline, "additional_rules_pdf_path", unit.university_id, "guidelines"),
+            (guideline, "pdf_path", university_id, "guidelines"),
+            (guideline, "additional_rules_pdf_path", university_id, "guidelines"),
         ]
     for upload in db.scalars(select(SubmissionVersion)):
         rows += [

@@ -1,3 +1,5 @@
+from typing import Any
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -11,6 +13,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from .models import Submission, SubmissionVersion
 from .report_parser import parse_ai_report
 
 
@@ -38,7 +41,13 @@ def _source_label(r):
     return f"{page} - {section}" if section else page
 
 
-def build_validation_report(path, submission, version, results, suggestions):
+def build_validation_report(
+    path: str,
+    submission: Submission,
+    version: SubmissionVersion,
+    results: list[dict[str, Any]],
+    suggestions: str,
+) -> None:
     """Generate a PDF with content parity to the full HTML validation report.
 
     The PDF intentionally uses the same source data and section order as the HTML

@@ -98,8 +98,8 @@ class Faculty(Base):
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(50))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    university = relationship("University")
-    departments = relationship("Department", back_populates="faculty")
+    university: Mapped["University"] = relationship("University")
+    departments: Mapped[list["Department"]] = relationship("Department", back_populates="faculty")
 
 
 class Institute(Base):
@@ -113,9 +113,9 @@ class Institute(Base):
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(50))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    university = relationship("University")
-    programs = relationship("Program", back_populates="institute")
-    teachers = relationship("Teacher", back_populates="institute")
+    university: Mapped["University"] = relationship("University")
+    programs: Mapped[list["Program"]] = relationship("Program", back_populates="institute")
+    teachers: Mapped[list["Teacher"]] = relationship("Teacher", back_populates="institute")
 
 
 class Department(Base):
@@ -130,9 +130,9 @@ class Department(Base):
     code: Mapped[str] = mapped_column(String(50))
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id"))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    faculty = relationship("Faculty", back_populates="departments")
-    programs = relationship("Program", back_populates="department")
-    teachers = relationship("Teacher", back_populates="department")
+    faculty: Mapped["Faculty"] = relationship("Faculty", back_populates="departments")
+    programs: Mapped[list["Program"]] = relationship("Program", back_populates="department")
+    teachers: Mapped[list["Teacher"]] = relationship("Teacher", back_populates="department")
 
 
 class Program(Base):
@@ -144,13 +144,13 @@ class Program(Base):
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    department = relationship("Department", back_populates="programs")
-    institute = relationship("Institute", back_populates="programs")
-    templates = relationship("Template", back_populates="program")
-    ai_profiles = relationship("AIProfile", back_populates="program")
+    department: Mapped["Department | None"] = relationship("Department", back_populates="programs")
+    institute: Mapped["Institute | None"] = relationship("Institute", back_populates="programs")
+    templates: Mapped[list["Template"]] = relationship("Template", back_populates="program")
+    ai_profiles: Mapped[list["AIProfile"]] = relationship("AIProfile", back_populates="program")
 
     @property
-    def unit_name(self):
+    def unit_name(self) -> str:
         return (
             self.department.name
             if self.department
@@ -158,12 +158,21 @@ class Program(Base):
         )
 
     @property
-    def unit_kind(self):
+    def unit_kind(self) -> str:
         return "department" if self.department_id else "institute"
 
     @property
-    def unit_id(self):
+    def unit_id(self) -> int | None:
         return self.department_id or self.institute_id
+
+    @property
+    def unit_university_id(self) -> int:
+        """The university of the department's faculty, or of the institute."""
+        if self.department is not None:
+            return self.department.faculty.university_id
+        if self.institute is not None:
+            return self.institute.university_id
+        raise LookupError(f"Program {self.id} belongs to no department or institute")
 
 
 class AdminUser(Base):
@@ -192,15 +201,25 @@ class AdminUser(Base):
     failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    university = relationship("University")
-    department = relationship("Department")
-    institute = relationship("Institute")
+    university: Mapped["University | None"] = relationship("University")
+    department: Mapped["Department | None"] = relationship("Department")
+    institute: Mapped["Institute | None"] = relationship("Institute")
 
     @property
-    def unit_name(self):
-        if self.department or self.institute:
-            return self.department.name if self.department else self.institute.name
+    def unit_name(self) -> str:
+        if self.department:
+            return self.department.name
+        if self.institute:
+            return self.institute.name
         return self.university.name if self.university else "Platform"
+
+    @property
+    def own_university_id(self) -> int:
+        """The admin's university. Only a Platform Admin has none, and no page a
+        Platform Admin can open asks for it."""
+        if self.university_id is None:
+            raise LookupError(f"Admin {self.id} is a Platform Admin and has no university")
+        return self.university_id
 
 
 class StudentUser(Base):
@@ -221,12 +240,12 @@ class StudentUser(Base):
     failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    university = relationship("University")
-    department = relationship("Department")
-    institute = relationship("Institute")
+    university: Mapped["University"] = relationship("University")
+    department: Mapped["Department | None"] = relationship("Department")
+    institute: Mapped["Institute | None"] = relationship("Institute")
 
     @property
-    def unit_name(self):
+    def unit_name(self) -> str:
         return (
             self.department.name
             if self.department
@@ -234,11 +253,11 @@ class StudentUser(Base):
         )
 
     @property
-    def unit_kind(self):
+    def unit_kind(self) -> str:
         return "department" if self.department_id else "institute"
 
     @property
-    def unit_id(self):
+    def unit_id(self) -> int | None:
         return self.department_id or self.institute_id
 
 
@@ -254,11 +273,11 @@ class Teacher(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     institute_id: Mapped[int | None] = mapped_column(ForeignKey("institutes.id"), nullable=True)
-    department = relationship("Department", back_populates="teachers")
-    institute = relationship("Institute", back_populates="teachers")
+    department: Mapped["Department | None"] = relationship("Department", back_populates="teachers")
+    institute: Mapped["Institute | None"] = relationship("Institute", back_populates="teachers")
 
     @property
-    def unit_name(self):
+    def unit_name(self) -> str:
         return (
             self.department.name
             if self.department
@@ -275,8 +294,8 @@ class Template(Base):
     submission_type: Mapped[str] = mapped_column(String(80))
     title: Mapped[str] = mapped_column(String(200))
     program_id: Mapped[int] = mapped_column(ForeignKey("programs.id"))
-    program = relationship("Program", back_populates="templates")
-    versions = relationship(
+    program: Mapped["Program"] = relationship("Program", back_populates="templates")
+    versions: Mapped[list["TemplateVersion"]] = relationship(
         "TemplateVersion", back_populates="template", cascade="all, delete-orphan"
     )
 
@@ -305,8 +324,8 @@ class TemplateVersion(Base):
         str_enum(ProfileStatus), default=ProfileStatus.NOT_EXTRACTED
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    template = relationship("Template", back_populates="versions")
-    rules = relationship(
+    template: Mapped["Template"] = relationship("Template", back_populates="versions")
+    rules: Mapped[list["ValidationRule"]] = relationship(
         "ValidationRule", back_populates="template_version", cascade="all, delete-orphan"
     )
 
@@ -324,7 +343,9 @@ class ValidationRule(Base):
     source_page: Mapped[str] = mapped_column(String(40), default="")
     source_text: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    template_version = relationship("TemplateVersion", back_populates="rules")
+    template_version: Mapped["TemplateVersion"] = relationship(
+        "TemplateVersion", back_populates="rules"
+    )
 
 
 class AIProfile(Base):
@@ -346,7 +367,7 @@ class AIProfile(Base):
     status: Mapped[AIProfileStatus] = mapped_column(
         str_enum(AIProfileStatus), default=AIProfileStatus.DRAFT
     )
-    program = relationship("Program", back_populates="ai_profiles")
+    program: Mapped["Program"] = relationship("Program", back_populates="ai_profiles")
 
 
 class Submission(Base):
@@ -366,12 +387,12 @@ class Submission(Base):
         str_enum(EmailStatus), default=EmailStatus.NOT_SENT
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    student = relationship("StudentUser")
-    program = relationship("Program")
-    teacher = relationship("Teacher")
-    template_version = relationship("TemplateVersion")
-    ai_profile = relationship("AIProfile")
-    versions = relationship(
+    student: Mapped["StudentUser"] = relationship("StudentUser")
+    program: Mapped["Program"] = relationship("Program")
+    teacher: Mapped["Teacher"] = relationship("Teacher")
+    template_version: Mapped["TemplateVersion"] = relationship("TemplateVersion")
+    ai_profile: Mapped["AIProfile | None"] = relationship("AIProfile")
+    versions: Mapped[list["SubmissionVersion"]] = relationship(
         "SubmissionVersion", back_populates="submission", cascade="all, delete-orphan"
     )
 
@@ -396,7 +417,7 @@ class SubmissionVersion(Base):
     ai_run_reference: Mapped[str] = mapped_column(String(120), default="")
     emailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    submission = relationship("Submission", back_populates="versions")
+    submission: Mapped["Submission"] = relationship("Submission", back_populates="versions")
 
 
 class JobType(StrEnum):
@@ -472,7 +493,7 @@ class AuditEvent(Base):
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     request_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    admin = relationship("AdminUser")
+    admin: Mapped["AdminUser | None"] = relationship("AdminUser")
 
 
 class AIJob(Base):

@@ -18,7 +18,7 @@ from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 from starlette.requests import Request
 
-from .core.errors import PermissionDenied
+from .errors import PermissionDenied
 
 MAX_FAILED_LOGINS = 10
 LOCKOUT = timedelta(minutes=15)

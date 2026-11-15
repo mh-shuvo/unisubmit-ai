@@ -4,10 +4,10 @@ import unittest
 
 import pytest
 
+from unisubmit.core.security import verify_password
 from unisubmit.models import AdminRole, AdminUser, Faculty, University
-from unisubmit.security import verify_password
 from unisubmit.seed import seed_demo_data
-from unisubmit.tenancy import TenancyError, create_platform_admin
+from unisubmit.tenancy.service import TenancyError, create_platform_admin
 
 
 class AdminBootstrapTests(unittest.TestCase):

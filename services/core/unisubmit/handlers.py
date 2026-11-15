@@ -26,12 +26,7 @@ from .ai_service_client import (
 from .core.config import get_settings
 from .emailer import send_submission_email
 from .format_validation import validate_all_profile_rules
-from .main import (
-    _normalize_profile_severities,
-    _profile_rule_stats,
-    _report_run_token,
-    semantic_validation_payload,
-)
+from .guidelines.profile import normalize_profile_severities
 from .models import (
     AIProfile,
     AIProfileStatus,
@@ -47,6 +42,8 @@ from .models import (
 from .pdf_utils import hidden_text_result, inspect_pdf, visible_text
 from .queue import FollowUp, TransientError
 from .reporting import build_validation_report
+from .submissions.service import report_run_token
+from .validation.semantic import profile_rule_stats, semantic_validation_payload
 from .validators import run_rules
 
 Payload = dict[str, Any]
@@ -161,7 +158,7 @@ class ValidateSubmission:
         if (hidden := hidden_text_result(info)) is not None:
             results.append(hidden)
         status = SubmissionStatus(outcome)
-        profile = _normalize_profile_severities(copy.deepcopy(guideline.format_profile_json or {}))
+        profile = normalize_profile_severities(copy.deepcopy(guideline.format_profile_json or {}))
         format_results = (
             validate_all_profile_rules(profile, info)
             if guideline.format_profile_status == ProfileStatus.ACTIVE
@@ -203,7 +200,7 @@ class ValidateSubmission:
                 r.get("severity") == "Mandatory" and r.get("status") == "FAIL" for r in semantic
             ):
                 status = SubmissionStatus.REVISION_REQUIRED
-        stats = _profile_rule_stats(checked.profile, results, submission.template_version.rules)
+        stats = profile_rule_stats(checked.profile, results, submission.template_version.rules)
         results.append({"category": "Validation Statistics", "status": "META", "statistics": stats})
         version.validation_json = results
         version.ai_suggestions = ai_text
@@ -211,7 +208,7 @@ class ValidateSubmission:
         report = (
             storage.directory(submission.university_id, "reports")
             / f"validation_submission_{submission.id}_v{version.version_no}_"
-            f"{_report_run_token(version)}.pdf"
+            f"{report_run_token(version)}.pdf"
         )
         build_validation_report(str(report), submission, version, results, ai_text)
         version.report_path = storage.relative(report)
@@ -338,7 +335,7 @@ class ParseGuideline:
             )
             if previous.get("review_audit"):
                 profile["review_audit"] = list(previous["review_audit"])[-100:]
-            profile = _normalize_profile_severities(profile)
+            profile = normalize_profile_severities(profile)
             guideline.format_profile_json = profile
             rules = len(profile.get("deterministic_rules", [])) + len(
                 profile.get("semantic_requirements", [])
@@ -366,13 +363,12 @@ class IndexGuideline:
         with self._sessions.begin() as db:
             guideline = _guideline(db, payload)
             program = guideline.template.program
-            unit = program.department.faculty if program.department else program.institute
             fields = {
                 **_fields(guideline),
                 # Named by id: display names are not unique and slugify alike (DEF-032).
                 "collection": f"tv_{guideline.id}",
                 # In every point's payload, to audit which tenant owns it (P2.10).
-                "university_id": str(unit.university_id),
+                "university_id": str(program.unit_university_id),
                 "recreate": "true",
             }
             pdfs = [str(storage.resolve(guideline.pdf_path))]
