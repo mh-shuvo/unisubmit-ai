@@ -101,12 +101,14 @@ The collection naming logic is in [`make_collection_name()`](file:///opt/homebre
 
 ```python
 def make_collection_name(department, program, submission_type, template_version):
-    return "_".join([
-        slugify(department),     # e.g. "engineering"
-        slugify(program),        # e.g. "computer_science"
-        slugify(submission_type),# e.g. "thesis"
-        slugify(template_version)# e.g. "v2024"
-    ])
+    return "_".join(
+        [
+            slugify(department),  # e.g. "engineering"
+            slugify(program),  # e.g. "computer_science"
+            slugify(submission_type),  # e.g. "thesis"
+            slugify(template_version),  # e.g. "v2024"
+        ]
+    )
 ```
 
 ---
@@ -118,7 +120,7 @@ When a student submits a PDF, the system creates a queued validation job. The ba
 ### Step 1 — Deterministic Checks (No AI needed)
 
 ```python
-info = inspect_pdf(sv.pdf_path)           # Extract fonts, margins, page count, etc.
+info = inspect_pdf(sv.pdf_path)  # Extract fonts, margins, page count, etc.
 results, det_status = run_rules(tv.rules, info)  # Check measurable rules
 format_results = validate_all_profile_rules(fmt_profile, info)  # Profile-based checks
 ```

@@ -1,10 +1,9 @@
 # Virtual environments
 .venv/
-ai_service/.venv/
 
 # Environment files (contain secrets)
 .env
-ai_service/.env
+services/ai/.env
 
 # Python cache
 __pycache__/

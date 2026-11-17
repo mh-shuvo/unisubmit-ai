@@ -1,0 +1,282 @@
+import math
+import re
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import fitz
+
+
+class PDFError(Exception):
+    pass
+
+
+PT_TO_MM = 25.4 / 72.0
+# Text a reader cannot see is where instructions to the model hide (P4.9):
+# white, fully transparent, smaller than this, or outside the page.
+TINY_PT = 4.0
+WHITE = 0xFFFFFF
+# Hidden fragments shorter than this stay in the text sent to the model; they
+# are too short to instruct it, and removing them could cut ordinary words.
+HIDDEN_FRAGMENT_MIN = 12
+
+
+def _norm_font(name: str) -> str:
+    n = (name or "").split("+")[-1].lower().replace("-", " ").replace("_", " ")
+    n = re.sub(r"\s+", " ", n).strip()
+    if "timesnewroman" in n.replace(" ", "") or ("times" in n and "roman" in n):
+        return "Times New Roman"
+    if "arial" in n:
+        return "Arial"
+    if "calibri" in n:
+        return "Calibri"
+    if "cambria" in n:
+        return "Cambria"
+    return (name or "").split("+")[-1]
+
+
+def _weighted_mode(items: list[tuple[Any, int]]) -> Any:
+    if not items:
+        return None
+    c: Counter[Any] = Counter()
+    for value, weight in items:
+        c[value] += max(1, weight)
+    return c.most_common(1)[0][0]
+
+
+def _percentile(values: list[float], p: float) -> float | None:
+    if not values:
+        return None
+    vals = sorted(values)
+    k = (len(vals) - 1) * p
+    f, c = math.floor(k), math.ceil(k)
+    if f == c:
+        return vals[int(k)]
+    return vals[f] * (c - k) + vals[c] * (k - f)
+
+
+def inspect_pdf(path: str) -> dict[str, Any]:
+    p = Path(path)
+    if p.suffix.lower() != ".pdf":
+        raise PDFError("Only PDF files are allowed.")
+    try:
+        doc = fitz.open(path)
+    except (RuntimeError, ValueError) as e:  # PyMuPDF's FileDataError is a RuntimeError
+        raise PDFError(f"Invalid or corrupted PDF: {e}") from e
+    if doc.needs_pass:
+        doc.close()
+        raise PDFError("Password-protected PDFs are not allowed.")
+
+    texts: list[str] = []
+    page_sizes: list[tuple[float, float]] = []
+    font_sizes: list[float] = []
+    page_details: list[dict[str, Any]] = []
+    hidden = []  # (page, text)
+    all_font_weighted: list[tuple[Any, int]] = []
+    all_size_weighted: list[tuple[Any, int]] = []
+
+    for page_idx, page in enumerate(doc):
+        rect = page.rect
+        page_sizes.append((round(rect.width, 1), round(rect.height, 1)))
+        page_text = page.get_text("text")
+        texts.append(page_text)
+        d = page.get_text("dict")
+        spans: list[dict[str, Any]] = []
+        lines_meta: list[dict[str, Any]] = []
+        page_font_weighted: list[tuple[Any, int]] = []
+        page_size_weighted: list[tuple[Any, int]] = []
+        content_x0: list[float] = []
+        content_x1: list[float] = []
+        content_y0: list[float] = []
+        content_y1: list[float] = []
+        body_lines: list[dict[str, Any]] = []
+        line_spacings: list[float] = []
+
+        for block in d.get("blocks", []):
+            for line in block.get("lines", []):
+                bbox = line.get("bbox") or (0, 0, 0, 0)
+                line_text_parts = []
+                line_sizes = []
+                for span in line.get("spans", []):
+                    text = (span.get("text") or "").strip()
+                    if not text:
+                        continue
+                    size = round(float(span.get("size") or 0), 1)
+                    raw_font = span.get("font") or ""
+                    font = _norm_font(raw_font)
+                    sb = tuple(round(float(x), 1) for x in (span.get("bbox") or (0, 0, 0, 0)))
+                    if (
+                        span.get("color") == WHITE
+                        or span.get("alpha", 255) == 0
+                        or 0 < size < TINY_PT
+                        or not fitz.Rect(sb).intersects(rect)
+                    ):
+                        hidden.append((page_idx + 1, text))
+                    # _norm_font collapses every weight to the family name, so record
+                    # the style here or 'TimesNewRomanPS-BoldMT' is indistinguishable
+                    # from the regular face and no bold check can ever succeed.
+                    flags = int(span.get("flags") or 0)
+                    low_font = raw_font.lower()
+                    item = {
+                        "text": text,
+                        "font": font,
+                        "size": size,
+                        "bbox": sb,
+                        "bold": bool(flags & 16) or "bold" in low_font,
+                        "italic": bool(flags & 2) or "italic" in low_font or "oblique" in low_font,
+                    }
+                    spans.append(item)
+                    w = len(text)
+                    font_sizes.append(size)
+                    all_font_weighted.append((font, w))
+                    all_size_weighted.append((size, w))
+                    page_font_weighted.append((font, w))
+                    page_size_weighted.append((size, w))
+                    line_sizes.append(size)
+                    line_text_parts.append(text)
+                if line_text_parts:
+                    lb = tuple(round(float(x), 1) for x in bbox)
+                    line_text = " ".join(line_text_parts)
+                    avg_size = round(sum(line_sizes) / len(line_sizes), 1) if line_sizes else 0
+                    lines_meta.append({"text": line_text, "bbox": lb, "font_size": avg_size})
+                    # Generic content area retained for diagnostics only.
+                    ymid = (lb[1] + lb[3]) / 2
+                    if rect.height * 0.07 <= ymid <= rect.height * 0.93:
+                        content_x0.append(lb[0])
+                        content_x1.append(lb[2])
+                        content_y0.append(lb[1])
+                        content_y1.append(lb[3])
+
+                    # Robust margin evidence should come from ordinary body-like lines,
+                    # not centered titles, TOC dot leaders, tables/captions, or short labels.
+                    stripped = line_text.strip()
+                    letters = "".join(ch for ch in stripped if ch.isalpha())
+                    is_all_caps = bool(letters) and letters == letters.upper()
+                    is_dot_leader = "...." in stripped
+                    is_caption = bool(re.match(r"^(?:figure|table)\s+\d", stripped, re.I))
+                    is_numbered_heading = bool(
+                        re.match(r"^(?:chapter\s+\w+|\d+(?:\.\d+)+)\b", stripped, re.I)
+                    )
+                    long_enough = len(stripped) >= 35
+                    # Most thesis body lines are 10-14 pt. This keeps headings out while
+                    # remaining tolerant across departmental templates.
+                    body_size = 9.0 <= avg_size <= 14.5
+                    if (
+                        long_enough
+                        and body_size
+                        and not is_all_caps
+                        and not is_dot_leader
+                        and not is_caption
+                        and not is_numbered_heading
+                    ):
+                        body_lines.append({"text": stripped, "bbox": lb, "font_size": avg_size})
+
+        # Line spacing is measured over the page's body lines in reading order
+        # rather than within a MuPDF block. MuPDF starts a new block as soon as the
+        # baseline gap passes roughly 1.5 em, so a genuinely double-spaced page puts
+        # every line in a block of its own and a per-block pairing can never observe
+        # the 2.0 the guideline asks for.
+        ordered = sorted(body_lines, key=lambda x: x["bbox"][1])
+        for a, b in zip(ordered, ordered[1:]):
+            if not (a["font_size"] and b["font_size"]):
+                continue
+            # Neighbouring lines of one text column overlap horizontally; lines in
+            # different columns do not, and their gap is not a line spacing.
+            if min(a["bbox"][2], b["bbox"][2]) <= max(a["bbox"][0], b["bbox"][0]):
+                continue
+            baseline_gap = b["bbox"][1] - a["bbox"][1]
+            fs = (a["font_size"] + b["font_size"]) / 2
+            if 0.8 * fs <= baseline_gap <= 3.0 * fs:
+                line_spacings.append(baseline_gap / fs)
+
+        margins: dict[str, Any] = {}
+        # For PDF validation we cannot recover the original Word margin settings.
+        # What we can verify reliably is the body-text frame and whether body content
+        # intrudes into a required margin. Sparse pages must never look like a huge
+        # bottom-margin failure simply because the page has little text.
+        margin_evidence = body_lines if body_lines else []
+        if margin_evidence:
+            bx0 = [x["bbox"][0] for x in margin_evidence]
+            bx1 = [x["bbox"][2] for x in margin_evidence]
+            by0 = [x["bbox"][1] for x in margin_evidence]
+            by1 = [x["bbox"][3] for x in margin_evidence]
+            left = _percentile(bx0, 0.10) or 0.0
+            # Right edge uses the longest/fullest body lines only. The 90th percentile
+            # avoids short lines making the right margin appear too large.
+            right = _percentile(bx1, 0.90) or 0.0
+            # Top/bottom are intrusion boundaries, not estimates of paragraph extent.
+            top = min(by0)
+            bottom = max(by1)
+            margins = {
+                "left_mm": round(left * PT_TO_MM, 1),
+                "right_mm": round((rect.width - right) * PT_TO_MM, 1),
+                "top_mm": round(top * PT_TO_MM, 1),
+                "bottom_mm": round((rect.height - bottom) * PT_TO_MM, 1),
+                "method": "body_text_frame",
+                "evidence_lines": len(margin_evidence),
+            }
+        page_details.append(
+            {
+                "page": page_idx + 1,
+                "width_pt": round(rect.width, 1),
+                "height_pt": round(rect.height, 1),
+                "width_mm": round(rect.width * PT_TO_MM, 1),
+                "height_mm": round(rect.height * PT_TO_MM, 1),
+                "dominant_font": _weighted_mode(page_font_weighted),
+                "dominant_font_size": _weighted_mode(page_size_weighted),
+                "estimated_line_spacing": round(_percentile(line_spacings, 0.5) or 0.0, 2)
+                if line_spacings
+                else None,
+                "margins": margins,
+                "spans": spans,
+                "lines": lines_meta,
+            }
+        )
+
+    doc.close()
+    text = "\n".join(texts).strip()
+    return {
+        "page_count": len(page_sizes),
+        "text": text,
+        "hidden_text": {
+            "pages": sorted({page for page, _ in hidden}),
+            "characters": sum(len(fragment) for _, fragment in hidden),
+            "fragments": [fragment for _, fragment in hidden],
+        },
+        "searchable": len(text) > 50,
+        "page_sizes": page_sizes,
+        "font_sizes": font_sizes,
+        "file_size": p.stat().st_size,
+        "dominant_font": _weighted_mode(all_font_weighted),
+        "dominant_font_size": _weighted_mode(all_size_weighted),
+        "pages": page_details,
+    }
+
+
+def visible_text(info: dict[str, Any]) -> str:
+    """The document text without its hidden fragments, for the model (P4.9)."""
+    text = str(info["text"])
+    for fragment in info.get("hidden_text", {}).get("fragments", []):
+        if len(fragment) >= HIDDEN_FRAGMENT_MIN:
+            text = text.replace(fragment, "")
+    return text
+
+
+def hidden_text_result(info: dict[str, Any]) -> dict[str, Any] | None:
+    """A warning listing the pages with hidden or tiny text, or None."""
+    hidden = info.get("hidden_text") or {}
+    if not hidden.get("characters"):
+        return None
+    pages = ", ".join(str(page) for page in hidden["pages"])
+    return {
+        "category": "System Restriction",
+        "name": "No hidden or tiny text",
+        "severity": "Warning",
+        "status": "WARNING",
+        "expected": "All text visible",
+        "detected": f"{hidden['characters']} hidden characters on page(s) {pages}",
+        "message": (
+            "Some text is white, transparent, smaller than 4 pt or off the page. It was left "
+            "out of the AI review; remove it unless it is intentional."
+        ),
+    }
