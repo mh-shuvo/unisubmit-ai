@@ -1,0 +1,114 @@
+{
+  // The checks from the README, run through `uv` so the versions are
+  // `uv.lock`'s and never drift from CI or from `pre-commit`.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ruff: format and fix",
+      "type": "shell",
+      "command": "uv run ruff format . && uv run ruff check --fix .",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      // `path:line:col: CODE message`, what remains after `--fix`
+      "problemMatcher": {
+        "owner": "ruff",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+): ([A-Z]+[0-9]+) (.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "code": 4,
+          "message": 5
+        }
+      }
+    },
+    {
+      "label": "mypy",
+      "type": "shell",
+      "command": "uv run mypy services/core/unisubmit services/ai/unisubmit_ai",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      // `path:line: error: message  [code]`
+      "problemMatcher": {
+        "owner": "mypy",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.+):(\\d+):\\s+(error|warning|note):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "severity": 3,
+          "message": 4
+        }
+      }
+    },
+    {
+      "label": "import contracts",
+      "type": "shell",
+      "command": "uv run lint-imports",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "pytest",
+      "type": "shell",
+      "command": "uv run pytest",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      // The tenancy and integration tests skip without a disposable
+      // PostgreSQL; `compose.yaml` publishes one on 5433.
+      "label": "pytest: with PostgreSQL",
+      "type": "shell",
+      "command": "uv run pytest",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "TEST_DATABASE_URL": "postgresql+psycopg://unisubmit:${input:pgPassword}@127.0.0.1:5433/unisubmit_test"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      // What CI runs, in CI's order.
+      "label": "checks: all",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "ruff: format and fix",
+        "mypy",
+        "import contracts",
+        "pytest"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pgPassword",
+      "type": "promptString",
+      "description": "Password for the disposable test database",
+      "password": true
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  // Ruff and Pylance do the linting, formatting and type checking the
+  // `pre-commit` hooks and CI run; the rest is Python and its debugger.
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "charliermarsh.ruff"
+  ]
+}

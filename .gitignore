@@ -23,4 +23,10 @@ storage/
 
 # IDE
 .idea/
-.vscode/
+# The editor configuration is part of the project; whatever else VS Code
+# writes into `.vscode` is not.
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json

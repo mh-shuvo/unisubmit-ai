@@ -1,0 +1,69 @@
+{
+  // The web app, the worker and the AI service are three processes, as the
+  // README has them. `cwd` is the folder root in every one: the core reads
+  // `.env` through `env_file=".env"` and the AI service through
+  // `load_dotenv()`, both relative to the working directory.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "core: web app",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "unisubmit.main:create_app",
+        "--factory",
+        "--reload",
+        "--port",
+        "8000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "core: worker",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unisubmit.worker",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "ai: service",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "unisubmit_ai.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8001"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      // Prompts for the subcommand: `migrate`, `relocate-files`, `seed-demo`
+      // or `create-platform-admin --email you@example.edu`.
+      "name": "core: unisubmit CLI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unisubmit.cli",
+      "args": "${command:pickArgs}",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "core + worker + ai",
+      "configurations": [
+        "core: web app",
+        "core: worker",
+        "ai: service"
+      ],
+      "stopAll": true
+    }
+  ]
+}

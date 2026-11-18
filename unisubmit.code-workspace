@@ -4,6 +4,10 @@
   // project sits several levels inside the Homebrew prefix, whose own
   // `.vscode` settings configure Ruby tooling and no Python at all.
   //
+  // The settings, run configurations, tasks and extension recommendations
+  // are in this folder's `.vscode`, so they apply when the folder is opened
+  // on its own too. Nothing is repeated here.
+  //
   // To work on another repository beside this one, add it with
   // `File > Add Folder to Workspace`; each folder keeps its own settings.
   "folders": [
@@ -11,37 +15,5 @@
       "name": "unisubmit",
       "path": "."
     }
-  ],
-  "settings": {
-    // The workspace venv, created by `uv sync --all-packages`. A virtualenv
-    // stores absolute paths, so rebuild it after moving or renaming the
-    // checkout rather than reusing the old one.
-    "python.defaultInterpreterPath": "${workspaceFolder:unisubmit}/.venv/bin/python",
-    // What `[tool.pyright]` in `pyproject.toml` is written against; naming it
-    // here keeps the editor and `pyright` on one setting across Pylance
-    // versions.
-    "python.analysis.typeCheckingMode": "standard",
-    // No arguments: `testpaths` and `pythonpath` come from `pyproject.toml`.
-    "python.testing.pytestEnabled": true,
-    "python.testing.unittestEnabled": false,
-    "python.testing.pytestArgs": [],
-    // `line-length = 100`, as the Ruff configuration has it.
-    "editor.rulers": [
-      100
-    ],
-    "files.exclude": {
-      "**/__pycache__": true,
-      "**/.mypy_cache": true,
-      "**/.pytest_cache": true,
-      "**/.ruff_cache": true,
-      "**/.import_linter_cache": true
-    }
-  },
-  "extensions": {
-    "recommendations": [
-      "ms-python.python",
-      "ms-python.vscode-pylance",
-      "charliermarsh.ruff"
-    ]
-  }
+  ]
 }

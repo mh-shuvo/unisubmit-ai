@@ -1,0 +1,42 @@
+{
+  // This project's editor configuration. It applies only when this folder is
+  // a workspace root, so open `unisubmit.code-workspace` or the folder
+  // itself: the checkout sits inside the Homebrew prefix, whose own
+  // `.vscode` configures Ruby tooling and no Python.
+  //
+  // The venv built by `uv sync --all-packages`. A virtualenv stores absolute
+  // paths, so rebuild it after moving or renaming the checkout.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  // What `[tool.pyright]` in `pyproject.toml` is written against. Pylance is
+  // pyright: naming the mode here keeps the editor on the same setting as
+  // the command line across Pylance versions.
+  "python.analysis.typeCheckingMode": "standard",
+  // No arguments: `testpaths` and `pythonpath` come from `pyproject.toml`.
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": [],
+  // `ruff format` is what `pre-commit` runs, so saving does the same thing.
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  // `line-length = 100`, as the Ruff configuration has it.
+  "editor.rulers": [
+    100
+  ],
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.import_linter_cache": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "storage": true,
+    "uv.lock": true
+  }
+}
