@@ -70,6 +70,29 @@ module = ["unisubmit_ai.main"]
 ignore_errors = true
 
 
+# The IDE's language server (Pylance) is pyright, which reads none of the
+# settings above: without this it resolves neither the workspace packages nor
+# the test helpers, and reports every project import unresolved. Checking the
+# same files as the mypy run above keeps the IDE and CI on one contract.
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.13"
+include = ["services/core/unisubmit", "services/ai/unisubmit_ai"]
+# The helpers pytest puts on pythonpath below; `unisubmit` and `unisubmit_ai`
+# come from the editable install in `.venv`.
+extraPaths = ["services/core/tests"]
+ignore = [
+  # Legacy baseline (P1.4), the exemption the mypy override above makes: this
+  # module is not type-checked until Phase 6 splits it.
+  "services/ai/unisubmit_ai/main.py",
+  # Not type-checked by CI either. Fixture dictionaries are built literally
+  # and then mutated, which pyright reads as a type error and mypy never sees.
+  "services/core/tests",
+  "services/ai/tests",
+  "tools",
+]
+
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 testpaths = ["services/core/tests", "services/ai/tests"]
